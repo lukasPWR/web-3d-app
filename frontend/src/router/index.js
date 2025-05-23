@@ -13,7 +13,15 @@ const router = createRouter({
       path: '/model/:id',
       name: 'model',
       // Lazy-loaded component
-      component: () => import('../views/ModelView.vue')
+      component: () => import('../views/ModelView.vue'),
+      // Add props: true to pass route params as component props
+      props: true
+    },
+    {
+      path: '/scene',
+      name: 'scene',
+      // Lazy-loaded component
+      component: () => import('../views/SceneView.vue')
     }
   ]
 })
