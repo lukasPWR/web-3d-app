@@ -92,10 +92,14 @@ export default {
       renderer = new THREE.WebGLRenderer({ 
         antialias: true,
         powerPreference: 'default',
-        failIfMajorPerformanceCaveat: false
+        failIfMajorPerformanceCaveat: false,
+        alpha: true
       });
-      renderer.setSize(container.value.clientWidth, container.value.clientHeight);
-      renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2)); // Limit pixel ratio
+      
+      // Ensure minimum width for renderer
+      const containerWidth = Math.max(container.value.clientWidth, 800);
+      renderer.setSize(containerWidth, container.value.clientHeight);
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
       renderer.shadowMap.enabled = true;
       
       // Check if container already has a canvas and remove it
@@ -438,12 +442,16 @@ export default {
       camera = null;
     };
     
-    // Handle window resize
+    // Handle window resize - updated for more responsive behavior
     const handleResize = () => {
       if (camera && renderer && container.value) {
-        camera.aspect = container.value.clientWidth / container.value.clientHeight;
+        // Force a minimum width for the container
+        const containerWidth = Math.max(container.value.clientWidth, 800);
+        const containerHeight = container.value.clientHeight;
+        
+        camera.aspect = containerWidth / containerHeight;
         camera.updateProjectionMatrix();
-        renderer.setSize(container.value.clientWidth, container.value.clientHeight);
+        renderer.setSize(containerWidth, containerHeight);
       }
     };
     
@@ -487,19 +495,21 @@ export default {
 .model-viewer-container {
   position: relative;
   width: 100%;
-  height: 90vh; /* Increased height to 90% of viewport height */
-  min-height: 700px; /* Increased minimum height */
-  max-width: 100%; /* Ensure it takes full available width */
-  margin: 0 auto; /* Center the container */
+  height: 70vh; /* Reduced height to prevent taking over viewport */
+  min-height: 600px;
+  min-width: 800px; /* Ensure a minimum width */
+  max-width: 100%;
+  margin: 0 auto;
   border: 1px solid #ddd;
   border-radius: 4px;
   overflow: hidden;
-  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1); /* Added subtle shadow for depth */
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
 }
 
 #modelViewer {
   width: 100%;
   height: 100%;
+  min-width: 800px; /* Ensure minimum width */
 }
 
 .loading-overlay {

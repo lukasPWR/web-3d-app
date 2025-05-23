@@ -1,6 +1,9 @@
 <template>
   <div class="scene-view">
-    <h1>3D Scene Editor</h1>
+    <div class="header-with-navigation">
+      <h1>3D Scene Editor</h1>
+      <button @click="$router.push('/')" class="back-button">Return to Main Menu</button>
+    </div>
     
     <div class="scene-container">
       <SimpleModelViewer 
@@ -50,17 +53,39 @@ export default {
   gap: 20px;
 }
 
-h1 {
+.header-with-navigation {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
   margin-bottom: 20px;
+}
+
+.back-button {
+  padding: 8px 16px;
+  background-color: #2196f3;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-weight: bold;
+  transition: background-color 0.3s;
+}
+
+.back-button:hover {
+  background-color: #0b7dda;
+}
+
+h1 {
+  margin: 0; /* Reset margin since it's now controlled by the parent div */
 }
 
 .scene-container {
   width: 100%;
-  height: 500px; /* Fixed height for the 3D viewer */
+  height: 650px; /* Fixed height for the 3D viewer */
   border: 1px solid #ddd;
   border-radius: 8px;
   overflow: hidden;
-  margin-bottom: 20px;
+
 }
 
 .empty-scene {

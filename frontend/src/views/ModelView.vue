@@ -9,13 +9,15 @@
       <h1>{{ model.name }}</h1>
       <p>{{ model.description }}</p>
       
-      <SimpleModelViewer 
-        :models="[{
-          id: model.id,
-          modelPath: model.modelUrl,
-          color: model.color || '#cccccc'
-        }]"
-      />
+      <div class="model-viewer-wrapper">
+        <SimpleModelViewer 
+          :models="[{
+            id: model.id,
+            modelPath: model.modelUrl,
+            color: model.color || '#cccccc'
+          }]"
+        />
+      </div>
       
       <div class="actions">
         <button @click="$router.push('/')">Back to Models</button>
@@ -111,6 +113,11 @@ export default {
 <style scoped>
 .model-view {
   padding: 20px;
+  width: 100%;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
 }
 
 .loading, .error {
@@ -123,11 +130,24 @@ export default {
 }
 
 .model-container {
-  max-width: 1000px;
+  width: 100%;  /* Take full width */
+  max-width: 1400px; /* Increased from previous values */
   margin: 0 auto;
   display: flex;
   flex-direction: column;
   align-items: center;
+}
+
+.model-viewer-wrapper {
+  width: 100%;
+  min-height: 600px;
+}
+
+/* Override the deep selector syntax for Vue 3 */
+:deep(.model-viewer-container) {
+  width: 100% !important;
+  height: 70vh !important;
+  min-height: 600px !important;
 }
 
 .model-container h1, 
