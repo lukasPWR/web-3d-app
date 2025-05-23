@@ -65,12 +65,16 @@ export default {
 
     // Scene objects
     let scene, camera, renderer, controls, gridHelper;
+    let animationFrameId = null; // Track animation frame ID
     
     // Map to track loaded models - key: modelId, value: THREE.Object3D
     const loadedModels = reactive(new Map());
     
     // Initialize Three.js scene
     const initScene = () => {
+      // Clean up any previous scene first
+      cleanupThreeJS();
+      
       // Create scene
       scene = new THREE.Scene();
       scene.background = new THREE.Color(0xf0f0f0);
@@ -84,11 +88,22 @@ export default {
       );
       camera.position.set(10, 10, 10);
       
-      // Create renderer
-      renderer = new THREE.WebGLRenderer({ antialias: true });
+      // Create renderer with better options for WebGL stability
+      renderer = new THREE.WebGLRenderer({ 
+        antialias: true,
+        powerPreference: 'default',
+        failIfMajorPerformanceCaveat: false
+      });
       renderer.setSize(container.value.clientWidth, container.value.clientHeight);
-      renderer.setPixelRatio(window.devicePixelRatio);
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2)); // Limit pixel ratio
       renderer.shadowMap.enabled = true;
+      
+      // Check if container already has a canvas and remove it
+      const existingCanvas = container.value.querySelector('canvas');
+      if (existingCanvas) {
+        container.value.removeChild(existingCanvas);
+      }
+      
       container.value.appendChild(renderer.domElement);
       
       // Add lights
@@ -333,11 +348,94 @@ export default {
       controls.update();
     };
     
-    // Animation loop
+    // Animation loop with proper tracking
     const animate = () => {
-      requestAnimationFrame(animate);
-      controls.update();
-      renderer.render(scene, camera);
+      // Cancel any existing animation frame first
+      if (animationFrameId !== null) {
+        cancelAnimationFrame(animationFrameId);
+      }
+      
+      // Request new animation frame and store the ID
+      animationFrameId = requestAnimationFrame(animate);
+      
+      // Only render if we have valid objects
+      if (controls && scene && camera && renderer) {
+        controls.update();
+        renderer.render(scene, camera);
+      }
+    };
+    
+    // Comprehensive cleanup function for Three.js resources
+    const cleanupThreeJS = () => {
+      // Cancel animation frame if it exists
+      if (animationFrameId !== null) {
+        cancelAnimationFrame(animationFrameId);
+        animationFrameId = null;
+      }
+      
+      // Dispose of all loaded models
+      if (loadedModels) {
+        loadedModels.forEach((model) => {
+          if (model) {
+            scene?.remove(model);
+            model.traverse((child) => {
+              if (child.isMesh) {
+                if (child.geometry) {
+                  child.geometry.dispose();
+                }
+                if (child.material) {
+                  if (Array.isArray(child.material)) {
+                    child.material.forEach(material => material.dispose());
+                  } else {
+                    child.material.dispose();
+                  }
+                }
+              }
+            });
+          }
+        });
+        loadedModels.clear();
+      }
+      
+      // Remove grid helper
+      if (gridHelper && scene) {
+        scene.remove(gridHelper);
+        gridHelper = null;
+      }
+      
+      // Dispose of renderer
+      if (renderer) {
+        renderer.dispose();
+        renderer.forceContextLoss();
+        
+        // Try to free WebGL resources
+        const gl = renderer.domElement?.getContext('webgl2') || 
+                  renderer.domElement?.getContext('webgl');
+        
+        if (gl) {
+          const loseExt = gl.getExtension('WEBGL_lose_context');
+          if (loseExt) {
+            loseExt.loseContext();
+          }
+        }
+        
+        // Clear renderer reference
+        renderer.domElement = null;
+        renderer = null;
+      }
+      
+      // Remove canvas from DOM if it exists
+      if (container.value) {
+        const canvas = container.value.querySelector('canvas');
+        if (canvas) {
+          container.value.removeChild(canvas);
+        }
+      }
+      
+      // Clear other references
+      controls = null;
+      scene = null;
+      camera = null;
     };
     
     // Handle window resize
@@ -352,8 +450,11 @@ export default {
     // Lifecycle hooks
     onMounted(() => {
       if (container.value) {
-        initScene();
-        loadModels();
+        // Slight delay to ensure DOM is ready
+        setTimeout(() => {
+          initScene();
+          loadModels();
+        }, 0);
       }
       
       window.addEventListener('resize', handleResize);
@@ -362,22 +463,8 @@ export default {
     onBeforeUnmount(() => {
       window.removeEventListener('resize', handleResize);
       
-      // Clean up Three.js resources
-      if (renderer) {
-        renderer.dispose();
-        renderer.forceContextLoss();
-        const gl = renderer.domElement.getContext('webgl');
-        if (gl) {
-          gl.getExtension('WEBGL_lose_context')?.loseContext();
-        }
-      }
-      
-      if (container.value && renderer) {
-        container.value.removeChild(renderer.domElement);
-      }
-      
-      // Clear all models
-      loadedModels.clear();
+      // Properly clean up Three.js resources
+      cleanupThreeJS();
     });
     
     // Watch for changes to models array or individual model props
