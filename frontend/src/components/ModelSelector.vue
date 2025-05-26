@@ -87,11 +87,29 @@ export default {
     
     // Add model to selection
     const addModel = (model) => {
+      // Calculate automatic position based on existing models count
+      const modelCount = props.selectedModels.length;
+      const spacing = 3; // Distance between models
+      const gridSize = Math.ceil(Math.sqrt(modelCount + 1)); // Grid dimensions
+      
+      // Calculate position in grid
+      const row = Math.floor(modelCount / gridSize);
+      const col = modelCount % gridSize;
+      
+      // Center the grid around origin
+      const gridOffset = (gridSize - 1) * spacing / 2;
+      
+      const autoPosition = {
+        x: (col * spacing) - gridOffset,
+        y: 0,
+        z: (row * spacing) - gridOffset
+      };
+      
       const modelWithDefaults = {
         ...model,
         // Ensure we have the correct property name for the model path
         modelPath: model.modelUrl || model.modelPath,
-        position: { x: 0, y: 0, z: 0 },
+        position: autoPosition,
         scale: 1,
         rotation: { x: 0, y: 0, z: 0 },
         color: '#' + Math.floor(Math.random()*16777215).toString(16), // Random color
