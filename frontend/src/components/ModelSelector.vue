@@ -122,8 +122,10 @@
                   type="number" 
                   step="0.1" 
                   min="0.1" 
-                  :value="model.scale || 1" 
+                  max="10"
+                  :value="(model.scale || 1).toFixed(1)" 
                   @input="updateModelScale(model.id, parseFloat($event.target.value))"
+                  title="Model Scale"
                 />
               </div>
               

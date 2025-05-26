@@ -75,6 +75,18 @@
           </div>
         </div>
         
+        <div class="control-section">
+          <h5>Scale</h5>
+          <div class="axis-control">
+            <label>Size:</label>
+            <div class="scale-buttons">
+              <button @click="scaleObject(-0.1)" class="direction-btn scale-btn">-</button>
+              <span class="scale-display">{{ (selectedObject.scale?.x || 1).toFixed(1) }}</span>
+              <button @click="scaleObject(0.1)" class="direction-btn scale-btn">+</button>
+            </div>
+          </div>
+        </div>
+        
         <div class="step-control">
           <label>Step Size:</label>
           <select v-model="moveStep">
@@ -127,7 +139,7 @@ export default {
       required: false
     }
   },
-  emits: ['model-position-changed', 'model-rotation-changed'],
+  emits: ['model-position-changed', 'model-rotation-changed', 'model-scale-changed'],
   setup(props, { emit }) {
     const container = ref(null);
     const isLoading = ref(true);
@@ -391,6 +403,18 @@ export default {
       emit('model-rotation-changed', { modelId, rotation: newRotation });
     };
     
+    // Scale selected object
+    const scaleObject = (delta) => {
+      if (!selectedObject.value) return;
+      
+      const newScale = Math.max(0.1, (selectedObject.value.scale.x || 1) + delta);
+      selectedObject.value.scale.set(newScale, newScale, newScale);
+      
+      // Emit scale change event
+      const modelId = selectedObject.value.userData.modelId;
+      emit('model-scale-changed', { modelId, scale: newScale });
+    };
+    
     // Reset selected object position
     const resetObjectPosition = () => {
       if (!selectedObject.value) return;
@@ -417,10 +441,21 @@ export default {
       });
     };
     
-    // Reset both position and rotation
+    // Reset selected object scale
+    const resetObjectScale = () => {
+      if (!selectedObject.value) return;
+      
+      selectedObject.value.scale.set(1, 1, 1);
+      
+      const modelId = selectedObject.value.userData.modelId;
+      emit('model-scale-changed', { modelId, scale: 1 });
+    };
+    
+    // Reset both position, rotation and scale
     const resetObjectTransform = () => {
       resetObjectPosition();
       resetObjectRotation();
+      resetObjectScale();
     };
     
     // Load a model
@@ -770,7 +805,8 @@ export default {
       rotateObject,
       resetObjectPosition,
       resetObjectRotation,
-      resetObjectTransform
+      resetObjectTransform,
+      scaleObject
     };
   }
 };
@@ -1005,5 +1041,41 @@ export default {
 
 .reset-btn:hover {
   background-color: #d32f2f !important;
+}
+
+.scale-buttons {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.scale-display {
+  min-width: 40px;
+  text-align: center;
+  font-weight: bold;
+  background-color: #f8f9fa;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  padding: 4px 8px;
+  font-size: 12px;
+}
+
+.scale-btn {
+  width: 28px;
+  height: 28px;
+  background-color: #e8f5e8;
+  border-color: #4caf50;
+  color: #2e7d32;
+  font-weight: bold;
+}
+
+.scale-btn:hover {
+  background-color: #c8e6c9;
+  border-color: #2e7d32;
+}
+
+.scale-btn:active {
+  background-color: #4caf50;
+  color: white;
 }
 </style>

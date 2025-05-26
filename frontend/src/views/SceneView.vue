@@ -10,6 +10,7 @@
         :models="selectedModels"
         @model-position-changed="handleModelPositionChanged"
         @model-rotation-changed="handleModelRotationChanged"
+        @model-scale-changed="handleModelScaleChanged"
         v-if="selectedModels.length > 0"
       />
       <div v-else class="empty-scene">
@@ -56,10 +57,19 @@ export default {
       }
     };
     
+    // Handle scale changes from edit mode
+    const handleModelScaleChanged = ({ modelId, scale }) => {
+      const modelIndex = selectedModels.value.findIndex(model => model.id === modelId);
+      if (modelIndex !== -1) {
+        selectedModels.value[modelIndex].scale = scale;
+      }
+    };
+    
     return {
       selectedModels,
       handleModelPositionChanged,
-      handleModelRotationChanged
+      handleModelRotationChanged,
+      handleModelScaleChanged
     };
   }
 };
