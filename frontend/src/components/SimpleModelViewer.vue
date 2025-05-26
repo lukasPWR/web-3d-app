@@ -1,112 +1,116 @@
 <template>
-  <div class="model-viewer-container">
-    <div id="modelViewer" ref="container"></div>
-    <div v-if="isLoading" class="loading-overlay">
-      <p>Loading models...</p>
-    </div>
-    
-    <div class="scene-controls">
-      <button @click="resetCamera" class="control-button">Reset View</button>
-      <button @click="toggleGrid" class="control-button">{{ showGrid ? 'Hide' : 'Show' }} Grid</button>
-      <button @click="toggleEditMode" class="control-button" :class="{ 'active': editMode }">
-        {{ editMode ? 'Exit Edit' : 'Edit Mode' }}
-      </button>
-    </div>
-    
-    <!-- Edit Mode Controls -->
-    <div v-if="editMode" class="edit-controls">
-      <div class="selected-object-info">
-        <h4>{{ selectedObject ? `Selected: ${selectedObject.userData.modelName}` : 'No object selected' }}</h4>
-        <p v-if="!selectedObject">Click on a model to select it</p>
+  <div class="model-viewer-wrapper">
+    <div class="model-viewer-container">
+      <div id="modelViewer" ref="container"></div>
+      <div v-if="isLoading" class="loading-overlay">
+        <p>Loading models...</p>
       </div>
       
-      <div v-if="selectedObject" class="movement-controls">
-        <div class="control-section">
-          <h5>Position</h5>
-          <div class="axis-control">
-            <label>X Axis:</label>
-            <div class="direction-buttons">
-              <button @click="moveObject('x', -moveStep)" class="direction-btn">←</button>
-              <button @click="moveObject('x', moveStep)" class="direction-btn">→</button>
+      <div class="scene-controls">
+        <button @click="resetCamera" class="control-button">Reset View</button>
+        <button @click="toggleGrid" class="control-button">{{ showGrid ? 'Hide' : 'Show' }} Grid</button>
+        <button @click="toggleEditMode" class="control-button" :class="{ 'active': editMode }">
+          {{ editMode ? 'Exit Edit' : 'Edit Mode' }}
+        </button>
+      </div>
+    </div>
+    
+    <!-- Edit Mode Controls - Now as sidebar -->
+    <div v-if="editMode" class="edit-sidebar">
+      <div class="edit-controls">
+        <div class="selected-object-info">
+          <h4>{{ selectedObject ? `Selected: ${selectedObject.userData.modelName}` : 'No object selected' }}</h4>
+          <p v-if="!selectedObject">Click on a model to select it</p>
+        </div>
+        
+        <div v-if="selectedObject" class="movement-controls">
+          <div class="control-section">
+            <h5>Position</h5>
+            <div class="axis-control">
+              <label>X Axis:</label>
+              <div class="direction-buttons">
+                <button @click="moveObject('x', -moveStep)" class="direction-btn">←</button>
+                <button @click="moveObject('x', moveStep)" class="direction-btn">→</button>
+              </div>
+            </div>
+            
+            <div class="axis-control">
+              <label>Y Axis:</label>
+              <div class="direction-buttons">
+                <button @click="moveObject('y', -moveStep)" class="direction-btn">↓</button>
+                <button @click="moveObject('y', moveStep)" class="direction-btn">↑</button>
+              </div>
+            </div>
+            
+            <div class="axis-control">
+              <label>Z Axis:</label>
+              <div class="direction-buttons">
+                <button @click="moveObject('z', moveStep)" class="direction-btn">←</button>
+                <button @click="moveObject('z', -moveStep)" class="direction-btn">→</button>
+              </div>
             </div>
           </div>
           
-          <div class="axis-control">
-            <label>Y Axis:</label>
-            <div class="direction-buttons">
-              <button @click="moveObject('y', -moveStep)" class="direction-btn">↓</button>
-              <button @click="moveObject('y', moveStep)" class="direction-btn">↑</button>
+          <div class="control-section">
+            <h5>Rotation</h5>
+            <div class="axis-control">
+              <label>X Axis:</label>
+              <div class="direction-buttons">
+                <button @click="rotateObject('x', -moveStep * 15)" class="direction-btn rotation-btn">↻</button>
+                <button @click="rotateObject('x', moveStep * 15)" class="direction-btn rotation-btn">↺</button>
+              </div>
+            </div>
+            
+            <div class="axis-control">
+              <label>Y Axis:</label>
+              <div class="direction-buttons">
+                <button @click="rotateObject('y', -moveStep * 15)" class="direction-btn rotation-btn">↻</button>
+                <button @click="rotateObject('y', moveStep * 15)" class="direction-btn rotation-btn">↺</button>
+              </div>
+            </div>
+            
+            <div class="axis-control">
+              <label>Z Axis:</label>
+              <div class="direction-buttons">
+                <button @click="rotateObject('z', -moveStep * 15)" class="direction-btn rotation-btn">↻</button>
+                <button @click="rotateObject('z', moveStep * 15)" class="direction-btn rotation-btn">↺</button>
+              </div>
             </div>
           </div>
           
-          <div class="axis-control">
-            <label>Z Axis:</label>
-            <div class="direction-buttons">
-              <button @click="moveObject('z', moveStep)" class="direction-btn">←</button>
-              <button @click="moveObject('z', -moveStep)" class="direction-btn">→</button>
-            </div>
-          </div>
-        </div>
-        
-        <div class="control-section">
-          <h5>Rotation</h5>
-          <div class="axis-control">
-            <label>X Axis:</label>
-            <div class="direction-buttons">
-              <button @click="rotateObject('x', -moveStep * 15)" class="direction-btn rotation-btn">↻</button>
-              <button @click="rotateObject('x', moveStep * 15)" class="direction-btn rotation-btn">↺</button>
+          <div class="control-section">
+            <h5>Scale</h5>
+            <div class="axis-control">
+              <label>Size:</label>
+              <div class="scale-buttons">
+                <button @click="scaleObject(-0.1)" class="direction-btn scale-btn">-</button>
+                <span class="scale-display">{{ (selectedObject.scale?.x || 1).toFixed(1) }}</span>
+                <button @click="scaleObject(0.1)" class="direction-btn scale-btn">+</button>
+              </div>
             </div>
           </div>
           
-          <div class="axis-control">
-            <label>Y Axis:</label>
-            <div class="direction-buttons">
-              <button @click="rotateObject('y', -moveStep * 15)" class="direction-btn rotation-btn">↻</button>
-              <button @click="rotateObject('y', moveStep * 15)" class="direction-btn rotation-btn">↺</button>
-            </div>
+          <div class="step-control">
+            <label>Step Size:</label>
+            <select v-model="moveStep">
+              <option value="0.1">0.1</option>
+              <option value="0.5">0.5</option>
+              <option value="1">1.0</option>
+              <option value="2">2.0</option>
+            </select>
           </div>
           
-          <div class="axis-control">
-            <label>Z Axis:</label>
-            <div class="direction-buttons">
-              <button @click="rotateObject('z', -moveStep * 15)" class="direction-btn rotation-btn">↻</button>
-              <button @click="rotateObject('z', moveStep * 15)" class="direction-btn rotation-btn">↺</button>
-            </div>
+          <div class="reset-controls">
+            <button @click="resetObjectPosition" class="control-button reset-btn small">
+              Reset Position
+            </button>
+            <button @click="resetObjectRotation" class="control-button reset-btn small">
+              Reset Rotation
+            </button>
+            <button @click="resetObjectTransform" class="control-button reset-btn">
+              Reset All
+            </button>
           </div>
-        </div>
-        
-        <div class="control-section">
-          <h5>Scale</h5>
-          <div class="axis-control">
-            <label>Size:</label>
-            <div class="scale-buttons">
-              <button @click="scaleObject(-0.1)" class="direction-btn scale-btn">-</button>
-              <span class="scale-display">{{ (selectedObject.scale?.x || 1).toFixed(1) }}</span>
-              <button @click="scaleObject(0.1)" class="direction-btn scale-btn">+</button>
-            </div>
-          </div>
-        </div>
-        
-        <div class="step-control">
-          <label>Step Size:</label>
-          <select v-model="moveStep">
-            <option value="0.1">0.1</option>
-            <option value="0.5">0.5</option>
-            <option value="1">1.0</option>
-            <option value="2">2.0</option>
-          </select>
-        </div>
-        
-        <div class="reset-controls">
-          <button @click="resetObjectPosition" class="control-button reset-btn small">
-            Reset Position
-          </button>
-          <button @click="resetObjectRotation" class="control-button reset-btn small">
-            Reset Rotation
-          </button>
-          <button @click="resetObjectTransform" class="control-button reset-btn">
-            Reset All
-          </button>
         </div>
       </div>
     </div>
@@ -813,16 +817,18 @@ export default {
 </script>
 
 <style scoped>
+.model-viewer-wrapper {
+  display: flex;
+  width: 100%;
+  height: 100%;
+}
+
 .model-viewer-container {
   position: relative;
-  width: 100%;
-  height: 70vh;
-  min-height: 600px;
-  min-width: 800px;
-  max-width: 100%;
-  margin: 0 auto;
-  border: 1px solid #ddd;
-  border-radius: 4px;
+  flex: 1;
+  height: 100%;
+  min-width: 600px;
+  border-right: 1px solid #ddd;
   overflow: hidden;
   box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
 }
@@ -874,18 +880,17 @@ export default {
   background-color: #ff6b00;
 }
 
-.edit-controls {
-  position: absolute;
-  top: 10px;
-  right: 10px;
-  background-color: rgba(255, 255, 255, 0.95);
-  padding: 15px;
-  border-radius: 8px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-  min-width: 280px;
-  max-width: 320px;
-  max-height: 80vh;
+.edit-sidebar {
+  width: 300px;
+  height: 100%;
+  background-color: #f8f9fa;
+  border-left: 1px solid #ddd;
   overflow-y: auto;
+}
+
+.edit-controls {
+  padding: 15px;
+  height: 100%;
 }
 
 .selected-object-info {
@@ -915,9 +920,9 @@ export default {
 .control-section {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  margin-bottom: 15px;
-  padding-bottom: 10px;
+  gap: 6px;
+  margin-bottom: 12px;
+  padding-bottom: 8px;
   border-bottom: 1px solid #eee;
 }
 
@@ -927,9 +932,9 @@ export default {
 }
 
 .control-section h5 {
-  margin: 0 0 8px 0;
+  margin: 0 0 6px 0;
   color: #333;
-  font-size: 13px;
+  font-size: 12px;
   font-weight: bold;
   text-transform: uppercase;
   letter-spacing: 0.5px;
@@ -939,31 +944,32 @@ export default {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  margin-bottom: 4px;
 }
 
 .axis-control label {
   font-weight: bold;
   color: #333;
-  font-size: 12px;
-  min-width: 40px;
+  font-size: 11px;
+  min-width: 35px;
 }
 
 .direction-buttons {
   display: flex;
-  gap: 4px;
+  gap: 3px;
 }
 
 .direction-btn {
-  width: 32px;
-  height: 32px;
+  width: 28px;
+  height: 28px;
   border: 1px solid #ddd;
   background-color: white;
-  border-radius: 4px;
+  border-radius: 3px;
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 16px;
+  font-size: 14px;
   transition: all 0.2s;
 }
 
@@ -997,34 +1003,35 @@ export default {
   display: flex;
   align-items: center;
   gap: 8px;
+  margin: 10px 0;
 }
 
 .step-control label {
   font-weight: bold;
   color: #333;
-  font-size: 12px;
+  font-size: 11px;
 }
 
 .step-control select {
-  padding: 4px 8px;
+  padding: 3px 6px;
   border: 1px solid #ddd;
-  border-radius: 4px;
-  font-size: 12px;
+  border-radius: 3px;
+  font-size: 11px;
 }
 
 .reset-controls {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  margin-top: 15px;
+  gap: 6px;
+  margin-top: 12px;
 }
 
 .reset-controls .small {
-  font-size: 11px;
-  padding: 4px 8px;
+  font-size: 10px;
+  padding: 3px 6px;
   background-color: #f0f0f0;
   border: 1px solid #ddd;
-  border-radius: 4px;
+  border-radius: 3px;
   cursor: pointer;
   transition: background-color 0.2s;
 }
@@ -1046,18 +1053,18 @@ export default {
 .scale-buttons {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
 }
 
 .scale-display {
-  min-width: 40px;
+  min-width: 35px;
   text-align: center;
   font-weight: bold;
   background-color: #f8f9fa;
   border: 1px solid #ddd;
-  border-radius: 4px;
-  padding: 4px 8px;
-  font-size: 12px;
+  border-radius: 3px;
+  padding: 3px 6px;
+  font-size: 11px;
 }
 
 .scale-btn {

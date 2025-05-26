@@ -6,15 +6,17 @@
     </div>
     
     <div class="scene-container">
-      <SimpleModelViewer 
-        :models="selectedModels"
-        @model-position-changed="handleModelPositionChanged"
-        @model-rotation-changed="handleModelRotationChanged"
-        @model-scale-changed="handleModelScaleChanged"
-        v-if="selectedModels.length > 0"
-      />
-      <div v-else class="empty-scene">
-        <p>No models in scene. Select models from the list below to add.</p>
+      <div class="viewer-and-controls">
+        <SimpleModelViewer 
+          :models="selectedModels"
+          @model-position-changed="handleModelPositionChanged"
+          @model-rotation-changed="handleModelRotationChanged"
+          @model-scale-changed="handleModelScaleChanged"
+          v-if="selectedModels.length > 0"
+        />
+        <div v-else class="empty-scene">
+          <p>No models in scene. Select models from the list below to add.</p>
+        </div>
       </div>
     </div>
     
@@ -81,6 +83,7 @@ export default {
   display: flex;
   flex-direction: column;
   gap: 20px;
+  height: 100vh;
 }
 
 .header-with-navigation {
@@ -111,14 +114,21 @@ h1 {
 
 .scene-container {
   width: 100%;
-  height: 650px; /* Fixed height for the 3D viewer */
+  height: 75vh;
   border: 1px solid #ddd;
   border-radius: 8px;
   overflow: hidden;
+  display: flex;
+}
 
+.viewer-and-controls {
+  width: 100%;
+  height: 100%;
+  display: flex;
 }
 
 .empty-scene {
+  width: 100%;
   height: 100%;
   display: flex;
   justify-content: center;
