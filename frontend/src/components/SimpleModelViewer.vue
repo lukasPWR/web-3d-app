@@ -490,6 +490,8 @@ export default {
     
     // Emit material change event
     const emitMaterialChange = () => {
+      if (!selectedObject.value) return;
+      
       const modelId = selectedObject.value.userData.modelId;
       emit('model-material-changed', { 
         modelId, 
@@ -663,18 +665,24 @@ export default {
         object.userData.modelName = modelData.name || `Model ${modelData.id}`;
         
         // Apply material/color if specified
-        if (modelData.color) {
-          const material = new THREE.MeshStandardMaterial({ 
-            color: new THREE.Color(modelData.color),
-            roughness: 0.7,
-            metalness: 0.1
-          });
+        if (modelData.color || modelData.material) {
+          const materialProps = {
+            color: new THREE.Color(modelData.color || '#cccccc'),
+            roughness: modelData.material?.roughness || 0.7,
+            metalness: modelData.material?.metalness || 0.1,
+            emissive: new THREE.Color(modelData.material?.emissive || '#000000'),
+            emissiveIntensity: modelData.material?.emissiveIntensity || 0.0
+          };
+          
+          const material = new THREE.MeshStandardMaterial(materialProps);
           
           object.traverse((child) => {
             if (child.isMesh) {
               child.material = material;
               child.castShadow = true;
               child.receiveShadow = true;
+              // Store original material for highlighting
+              originalMaterials.set(child, material);
             }
           });
         }
@@ -716,53 +724,112 @@ export default {
       }
     };
     
+    // Update existing model properties instead of reloading
+    const updateModelProperties = (modelData) => {
+      const existingModel = loadedModels.get(modelData.id);
+      if (!existingModel) return;
+      
+      // Update position
+      if (modelData.position) {
+        existingModel.position.set(
+          modelData.position.x || 0,
+          modelData.position.y || 0,
+          modelData.position.z || 0
+        );
+      }
+      
+      // Update rotation
+      if (modelData.rotation) {
+        existingModel.rotation.set(
+          THREE.MathUtils.degToRad(modelData.rotation.x || 0),
+          THREE.MathUtils.degToRad(modelData.rotation.y || 0),
+          THREE.MathUtils.degToRad(modelData.rotation.z || 0)
+        );
+      }
+      
+      // Update scale
+      if (modelData.scale) {
+        const scale = typeof modelData.scale === 'number' 
+          ? modelData.scale 
+          : modelData.scale.x || 1;
+        existingModel.scale.set(scale, scale, scale);
+      }
+      
+      // Update material properties
+      if (modelData.color || modelData.material) {
+        const materialProps = {
+          color: new THREE.Color(modelData.color || '#cccccc'),
+          roughness: modelData.material?.roughness || 0.7,
+          metalness: modelData.material?.metalness || 0.1,
+          emissive: new THREE.Color(modelData.material?.emissive || '#000000'),
+          emissiveIntensity: modelData.material?.emissiveIntensity || 0.0
+        };
+        
+        existingModel.traverse((child) => {
+          if (child.isMesh) {
+            const material = originalMaterials.get(child);
+            if (material) {
+              material.color.copy(materialProps.color);
+              material.roughness = materialProps.roughness;
+              material.metalness = materialProps.metalness;
+              material.emissive.copy(materialProps.emissive);
+              material.emissiveIntensity = materialProps.emissiveIntensity;
+            }
+          }
+        });
+      }
+    };
+
+    // Smart model management - only add/remove/update as needed
+    const manageModels = async () => {
+      if (!modelsToLoad.value || modelsToLoad.value.length === 0) {
+        // Remove all models if none to load
+        loadedModels.forEach((model, modelId) => {
+          scene.remove(model);
+          loadedModels.delete(modelId);
+        });
+        return;
+      }
+      
+      const currentModelIds = new Set(Array.from(loadedModels.keys()));
+      const newModelIds = new Set(modelsToLoad.value.map(m => m.id));
+      
+      // Remove models that are no longer in the list
+      for (const modelId of currentModelIds) {
+        if (!newModelIds.has(modelId)) {
+          const model = loadedModels.get(modelId);
+          scene.remove(model);
+          loadedModels.delete(modelId);
+        }
+      }
+      
+      // Add new models or update existing ones
+      for (const modelData of modelsToLoad.value) {
+        if (loadedModels.has(modelData.id)) {
+          // Update existing model properties
+          updateModelProperties(modelData);
+        } else {
+          // Load new model
+          await loadModel(modelData);
+        }
+      }
+      
+      // Only adjust camera if we have models and it's the first load
+      if (loadedModels.size > 0 && currentModelIds.size === 0) {
+        setTimeout(() => {
+          fitCameraToModels();
+        }, 100);
+      }
+    };
+
     // Load all models
     const loadModels = async () => {
       isLoading.value = true;
       
       try {
-        // Check if models array exists and is not empty
-        if (!modelsToLoad.value || modelsToLoad.value.length === 0) {
-          console.warn('No models provided or models array is empty');
-          isLoading.value = false;
-          return;
-        }
-        
-        console.log('Loading models:', modelsToLoad.value); // Debug log
-        
-        // Process each model in the array
-        const loadPromises = modelsToLoad.value.map(model => {
-          // Get path from either modelPath or modelUrl
-          const modelPath = model.modelPath || model.modelUrl;
-          
-          // Validate model data before attempting to load
-          if (!model || (!model.modelPath && !model.modelUrl)) {
-            console.error('Invalid model data:', model);
-            return Promise.resolve(null);
-          }
-          
-          // Check if URL is absolute or relative and handle accordingly
-          const isAbsoluteUrl = /^(https?:)?\/\//.test(modelPath);
-          const modelUrl = isAbsoluteUrl ? modelPath : modelPath;
-          
-          // Set the model path with corrected URL
-          const modelWithFixedPath = {
-            ...model,
-            modelPath: modelUrl // Always set modelPath for loader to use
-          };
-          
-          return loadModel(modelWithFixedPath);
-        });
-        
-        // Wait for all models to load (or fail)
-        await Promise.allSettled(loadPromises);
-        
-        // Only try to adjust camera if we successfully loaded at least one model
-        if (loadedModels.size > 0) {
-          fitCameraToModels();
-        }
+        await manageModels();
       } catch (err) {
-        console.error('Error loading models:', err);
+        console.error('Error managing models:', err);
       } finally {
         isLoading.value = false;
       }
@@ -951,9 +1018,10 @@ export default {
       cleanupThreeJS();
     });
     
-    // Watch for changes to models array or individual model props
-    watch([() => props.models, () => props.modelPath, () => props.modelFormat], () => {
-      loadModels();
+    // Watch for changes to models array with smart updating
+    watch([() => props.models], async () => {
+      console.log('Models prop changed, managing models intelligently');
+      await manageModels();
     }, { deep: true });
     
     return {

@@ -48,7 +48,11 @@ export default {
     const handleModelPositionChanged = ({ modelId, position }) => {
       const modelIndex = selectedModels.value.findIndex(model => model.id === modelId);
       if (modelIndex !== -1) {
-        selectedModels.value[modelIndex].position = position;
+        // Use Vue's reactivity properly to avoid unnecessary re-renders
+        selectedModels.value[modelIndex] = {
+          ...selectedModels.value[modelIndex],
+          position: { ...position }
+        };
       }
     };
     
@@ -56,7 +60,10 @@ export default {
     const handleModelRotationChanged = ({ modelId, rotation }) => {
       const modelIndex = selectedModels.value.findIndex(model => model.id === modelId);
       if (modelIndex !== -1) {
-        selectedModels.value[modelIndex].rotation = rotation;
+        selectedModels.value[modelIndex] = {
+          ...selectedModels.value[modelIndex],
+          rotation: { ...rotation }
+        };
       }
     };
     
@@ -64,7 +71,10 @@ export default {
     const handleModelScaleChanged = ({ modelId, scale }) => {
       const modelIndex = selectedModels.value.findIndex(model => model.id === modelId);
       if (modelIndex !== -1) {
-        selectedModels.value[modelIndex].scale = scale;
+        selectedModels.value[modelIndex] = {
+          ...selectedModels.value[modelIndex],
+          scale
+        };
       }
     };
     
@@ -72,9 +82,20 @@ export default {
     const handleModelMaterialChanged = ({ modelId, material }) => {
       const modelIndex = selectedModels.value.findIndex(model => model.id === modelId);
       if (modelIndex !== -1) {
-        selectedModels.value[modelIndex].material = material;
-        // Also update the color property for consistency
-        selectedModels.value[modelIndex].color = material.color;
+        const updatedModel = { ...selectedModels.value[modelIndex] };
+        
+        // Update the material object
+        updatedModel.material = {
+          ...updatedModel.material,
+          ...material
+        };
+        
+        // Also update the color property for consistency with ModelSelector
+        if (material.color) {
+          updatedModel.color = material.color;
+        }
+        
+        selectedModels.value[modelIndex] = updatedModel;
       }
     };
     

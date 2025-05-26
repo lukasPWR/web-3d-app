@@ -33,151 +33,14 @@
       </div>
     </div>
     
-    <div v-if="selectedModels.length > 0" class="selected-models">
-      <h3>Selected Models</h3>
-      <div class="edit-mode-info">
-        <p><strong>💡 Tip:</strong> Use "Edit Mode" in the 3D viewer to move objects by clicking and using arrow controls!</p>
-      </div>
-      <div class="selected-models-list">
-        <div 
-          v-for="model in selectedModels" 
-          :key="model.id" 
-          class="selected-model-item"
-        >
-          <div class="selected-model-info">
-            <span class="selected-model-name">{{ model.name }}</span>
-            <div class="selected-model-actions">
-              <div class="color-picker">
-                <label>Color:</label>
-                <input 
-                  type="color" 
-                  :value="model.color || '#cccccc'" 
-                  @input="updateModelColor(model.id, $event.target.value)"
-                />
-              </div>
-              
-              <div class="position-controls">
-                <label>Position:</label>
-                <div class="position-inputs">
-                  <input 
-                    type="number" 
-                    step="0.1" 
-                    :value="(model.position?.x || 0).toFixed(1)"
-                    @input="updateModelPosition(model.id, 'x', parseFloat($event.target.value))"
-                    placeholder="X"
-                    title="X Position"
-                  />
-                  <input 
-                    type="number" 
-                    step="0.1" 
-                    :value="(model.position?.y || 0).toFixed(1)" 
-                    @input="updateModelPosition(model.id, 'y', parseFloat($event.target.value))"
-                    placeholder="Y"
-                    title="Y Position"
-                  />
-                  <input 
-                    type="number" 
-                    step="0.1" 
-                    :value="(model.position?.z || 0).toFixed(1)" 
-                    @input="updateModelPosition(model.id, 'z', parseFloat($event.target.value))"
-                    placeholder="Z"
-                    title="Z Position"
-                  />
-                </div>
-              </div>
-              
-              <div class="rotation-controls">
-                <label>Rotation:</label>
-                <div class="rotation-inputs">
-                  <input 
-                    type="number" 
-                    step="1" 
-                    :value="Math.round(model.rotation?.x || 0)"
-                    @input="updateModelRotation(model.id, 'x', parseFloat($event.target.value))"
-                    placeholder="X"
-                    title="X Rotation (degrees)"
-                  />
-                  <input 
-                    type="number" 
-                    step="1" 
-                    :value="Math.round(model.rotation?.y || 0)" 
-                    @input="updateModelRotation(model.id, 'y', parseFloat($event.target.value))"
-                    placeholder="Y"
-                    title="Y Rotation (degrees)"
-                  />
-                  <input 
-                    type="number" 
-                    step="1" 
-                    :value="Math.round(model.rotation?.z || 0)" 
-                    @input="updateModelRotation(model.id, 'z', parseFloat($event.target.value))"
-                    placeholder="Z"
-                    title="Z Rotation (degrees)"
-                  />
-                </div>
-              </div>
-              
-              <div class="scale-control">
-                <label>Scale:</label>
-                <input 
-                  type="number" 
-                  step="0.1" 
-                  min="0.1" 
-                  max="10"
-                  :value="(model.scale || 1).toFixed(1)" 
-                  @input="updateModelScale(model.id, parseFloat($event.target.value))"
-                  title="Model Scale"
-                />
-              </div>
-              
-              <div class="material-controls">
-                <label>Material:</label>
-                <div class="material-inputs">
-                  <div class="material-input-group">
-                    <label>Roughness:</label>
-                    <input 
-                      type="range" 
-                      min="0" 
-                      max="1" 
-                      step="0.1"
-                      :value="model.material?.roughness || 0.7"
-                      @input="updateModelMaterial(model.id, 'roughness', parseFloat($event.target.value))"
-                      class="material-slider"
-                    />
-                    <span>{{ (model.material?.roughness || 0.7).toFixed(1) }}</span>
-                  </div>
-                  
-                  <div class="material-input-group">
-                    <label>Metalness:</label>
-                    <input 
-                      type="range" 
-                      min="0" 
-                      max="1" 
-                      step="0.1"
-                      :value="model.material?.metalness || 0.1"
-                      @input="updateModelMaterial(model.id, 'metalness', parseFloat($event.target.value))"
-                      class="material-slider"
-                    />
-                    <span>{{ (model.material?.metalness || 0.1).toFixed(1) }}</span>
-                  </div>
-                </div>
-              </div>
-              
-              <button 
-                class="remove-button" 
-                @click.stop="removeModel(model.id)"
-              >
-                Remove
-              </button>
-            </div>
-          </div>
-        </div>
-      </div>
+    <div v-if="selectedModels.length > 0" class="edit-mode-info">
+      <p><strong>💡 Tip:</strong> Use "Edit Mode" in the 3D viewer to move objects by clicking and using arrow controls!</p>
     </div>
   </div>
 </template>
 
 <script>
-import { ref, computed, onMounted } from 'vue';
+import { ref, onMounted } from 'vue';
 import axios from 'axios';
 
 export default {
@@ -226,11 +89,21 @@ export default {
     const addModel = (model) => {
       const modelWithDefaults = {
         ...model,
+        // Ensure we have the correct property name for the model path
+        modelPath: model.modelUrl || model.modelPath,
         position: { x: 0, y: 0, z: 0 },
         scale: 1,
         rotation: { x: 0, y: 0, z: 0 },
-        color: '#' + Math.floor(Math.random()*16777215).toString(16) // Random color
+        color: '#' + Math.floor(Math.random()*16777215).toString(16), // Random color
+        material: {
+          roughness: 0.7,
+          metalness: 0.1,
+          emissive: '#000000',
+          emissiveIntensity: 0.0
+        }
       };
+      
+      console.log('Adding model to selection:', modelWithDefaults); // Debug log
       
       const updatedSelection = [...props.selectedModels, modelWithDefaults];
       emit('update:selected-models', updatedSelection);
@@ -242,72 +115,6 @@ export default {
       emit('update:selected-models', updatedSelection);
     };
     
-    // Update model color
-    const updateModelColor = (modelId, newColor) => {
-      const updatedSelection = props.selectedModels.map(model => {
-        if (model.id === modelId) {
-          return { ...model, color: newColor };
-        }
-        return model;
-      });
-      
-      emit('update:selected-models', updatedSelection);
-    };
-    
-    // Update model position
-    const updateModelPosition = (modelId, axis, value) => {
-      const updatedSelection = props.selectedModels.map(model => {
-        if (model.id === modelId) {
-          const position = { ...(model.position || { x: 0, y: 0, z: 0 }) };
-          position[axis] = value;
-          return { ...model, position };
-        }
-        return model;
-      });
-      
-      emit('update:selected-models', updatedSelection);
-    };
-    
-    // Update model rotation
-    const updateModelRotation = (modelId, axis, value) => {
-      const updatedSelection = props.selectedModels.map(model => {
-        if (model.id === modelId) {
-          const rotation = { ...(model.rotation || { x: 0, y: 0, z: 0 }) };
-          rotation[axis] = value;
-          return { ...model, rotation };
-        }
-        return model;
-      });
-      
-      emit('update:selected-models', updatedSelection);
-    };
-    
-    // Update model scale
-    const updateModelScale = (modelId, value) => {
-      const updatedSelection = props.selectedModels.map(model => {
-        if (model.id === modelId) {
-          return { ...model, scale: value };
-        }
-        return model;
-      });
-      
-      emit('update:selected-models', updatedSelection);
-    };
-    
-    // Update model material properties
-    const updateModelMaterial = (modelId, property, value) => {
-      const updatedSelection = props.selectedModels.map(model => {
-        if (model.id === modelId) {
-          const material = { ...(model.material || { roughness: 0.7, metalness: 0.1 }) };
-          material[property] = value;
-          return { ...model, material };
-        }
-        return model;
-      });
-      
-      emit('update:selected-models', updatedSelection);
-    };
-    
     onMounted(fetchModels);
     
     return {
@@ -316,12 +123,7 @@ export default {
       error,
       isModelSelected,
       toggleModel,
-      removeModel,
-      updateModelColor,
-      updateModelPosition,
-      updateModelRotation,
-      updateModelScale,
-      updateModelMaterial
+      removeModel
     };
   }
 };
@@ -433,93 +235,6 @@ h2 {
   background-color: #d32f2f;
 }
 
-.selected-models {
-  background-color: #f5f5f5;
-  border-radius: 6px;
-  padding: 1rem;
-}
-
-.selected-models h3 {
-  margin-top: 0;
-  margin-bottom: 1rem;
-}
-
-.selected-models-list {
-  display: flex;
-  flex-direction: column;
-  gap: 0.8rem;
-}
-
-.selected-model-item {
-  background-color: white;
-  padding: 0.8rem;
-  border-radius: 4px;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
-}
-
-.selected-model-info {
-  display: flex;
-  flex-direction: column;
-  gap: 0.8rem;
-}
-
-.selected-model-name {
-  font-weight: bold;
-}
-
-.selected-model-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 1rem;
-  align-items: center;
-}
-
-.color-picker, .position-controls, .rotation-controls, .scale-control {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-}
-
-.position-inputs, .rotation-inputs {
-  display: flex;
-  gap: 0.3rem;
-}
-
-.position-inputs input, .rotation-inputs input {
-  width: 60px;
-  text-align: center;
-  font-size: 12px;
-}
-
-.position-inputs input:focus, .rotation-inputs input:focus {
-  border-color: #2196f3;
-  outline: none;
-  box-shadow: 0 0 3px rgba(33, 150, 243, 0.3);
-}
-
-input[type="number"] {
-  padding: 0.3rem;
-  border: 1px solid #ddd;
-  border-radius: 4px;
-}
-
-input[type="color"] {
-  padding: 0;
-  width: 30px;
-  height: 30px;
-  border: 1px solid #ddd;
-  border-radius: 4px;
-  cursor: pointer;
-}
-
-button {
-  padding: 0.4rem 0.8rem;
-  border: none;
-  border-radius: 4px;
-  cursor: pointer;
-  transition: background-color 0.2s;
-}
-
 .edit-mode-info {
   background-color: #e3f2fd;
   border: 1px solid #2196f3;
@@ -532,44 +247,5 @@ button {
   margin: 0;
   color: #1976d2;
   font-size: 14px;
-}
-
-.material-controls {
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-}
-
-.material-inputs {
-  display: flex;
-  flex-direction: column;
-  gap: 0.3rem;
-}
-
-.material-input-group {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  font-size: 12px;
-}
-
-.material-input-group label {
-  min-width: 60px;
-  font-size: 11px;
-}
-
-.material-slider {
-  flex: 1;
-  min-width: 80px;
-}
-
-.material-input-group span {
-  min-width: 25px;
-  text-align: center;
-  font-size: 10px;
-  background-color: #f8f9fa;
-  padding: 2px 4px;
-  border-radius: 2px;
-  border: 1px solid #ddd;
 }
 </style>
