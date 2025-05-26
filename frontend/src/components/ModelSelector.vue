@@ -86,6 +86,36 @@
                 </div>
               </div>
               
+              <div class="rotation-controls">
+                <label>Rotation:</label>
+                <div class="rotation-inputs">
+                  <input 
+                    type="number" 
+                    step="1" 
+                    :value="Math.round(model.rotation?.x || 0)"
+                    @input="updateModelRotation(model.id, 'x', parseFloat($event.target.value))"
+                    placeholder="X"
+                    title="X Rotation (degrees)"
+                  />
+                  <input 
+                    type="number" 
+                    step="1" 
+                    :value="Math.round(model.rotation?.y || 0)" 
+                    @input="updateModelRotation(model.id, 'y', parseFloat($event.target.value))"
+                    placeholder="Y"
+                    title="Y Rotation (degrees)"
+                  />
+                  <input 
+                    type="number" 
+                    step="1" 
+                    :value="Math.round(model.rotation?.z || 0)" 
+                    @input="updateModelRotation(model.id, 'z', parseFloat($event.target.value))"
+                    placeholder="Z"
+                    title="Z Rotation (degrees)"
+                  />
+                </div>
+              </div>
+              
               <div class="scale-control">
                 <label>Scale:</label>
                 <input 
@@ -203,6 +233,20 @@ export default {
       emit('update:selected-models', updatedSelection);
     };
     
+    // Update model rotation
+    const updateModelRotation = (modelId, axis, value) => {
+      const updatedSelection = props.selectedModels.map(model => {
+        if (model.id === modelId) {
+          const rotation = { ...(model.rotation || { x: 0, y: 0, z: 0 }) };
+          rotation[axis] = value;
+          return { ...model, rotation };
+        }
+        return model;
+      });
+      
+      emit('update:selected-models', updatedSelection);
+    };
+    
     // Update model scale
     const updateModelScale = (modelId, value) => {
       const updatedSelection = props.selectedModels.map(model => {
@@ -226,6 +270,7 @@ export default {
       removeModel,
       updateModelColor,
       updateModelPosition,
+      updateModelRotation,
       updateModelScale
     };
   }
@@ -379,24 +424,24 @@ h2 {
   align-items: center;
 }
 
-.color-picker, .position-controls, .scale-control {
+.color-picker, .position-controls, .rotation-controls, .scale-control {
   display: flex;
   align-items: center;
   gap: 0.5rem;
 }
 
-.position-inputs {
+.position-inputs, .rotation-inputs {
   display: flex;
   gap: 0.3rem;
 }
 
-.position-inputs input {
+.position-inputs input, .rotation-inputs input {
   width: 60px;
   text-align: center;
   font-size: 12px;
 }
 
-.position-inputs input:focus {
+.position-inputs input:focus, .rotation-inputs input:focus {
   border-color: #2196f3;
   outline: none;
   box-shadow: 0 0 3px rgba(33, 150, 243, 0.3);

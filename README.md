@@ -11,7 +11,7 @@ This project consists of:
 - **Multi-Model Scenes**: Create scenes with multiple 3D models
 - **Edit Mode**: Interactive object manipulation with directional controls
 - **Model Management**: Upload, view, and delete 3D models
-- **Real-time Controls**: Position adjustment using arrow controls or manual input
+- **Real-time Controls**: Position and rotation adjustment using arrow controls or manual input
 
 ## Edit Mode
 
@@ -19,8 +19,9 @@ The 3D Scene Editor includes an interactive edit mode that allows you to:
 
 - Click on objects to select them
 - Use directional arrow buttons to move objects along X, Y, Z axes
-- Adjust movement step size (0.1, 0.5, 1.0, 2.0 units)
-- Reset object positions
+- Rotate objects around X, Y, Z axes using rotation controls
+- Adjust movement and rotation step sizes (0.1, 0.5, 1.0, 2.0 units)
+- Reset object positions and rotations
 - Visual highlighting of selected objects
 
 **How to use Edit Mode:**
@@ -30,7 +31,8 @@ The 3D Scene Editor includes an interactive edit mode that allows you to:
 3. Click "Edit Mode" button in the 3D viewer
 4. Click on any object to select it
 5. Use the arrow controls in the edit panel to move the object
-6. Exit edit mode to return to normal camera controls
+6. Use the rotation controls to rotate the object around each axis
+7. Exit edit mode to return to normal camera controls
 
 ## Project Structure
 

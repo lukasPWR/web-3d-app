@@ -21,27 +21,57 @@
       </div>
       
       <div v-if="selectedObject" class="movement-controls">
-        <div class="axis-control">
-          <label>X Axis:</label>
-          <div class="direction-buttons">
-            <button @click="moveObject('x', -moveStep)" class="direction-btn">←</button>
-            <button @click="moveObject('x', moveStep)" class="direction-btn">→</button>
+        <div class="control-section">
+          <h5>Position</h5>
+          <div class="axis-control">
+            <label>X Axis:</label>
+            <div class="direction-buttons">
+              <button @click="moveObject('x', -moveStep)" class="direction-btn">←</button>
+              <button @click="moveObject('x', moveStep)" class="direction-btn">→</button>
+            </div>
+          </div>
+          
+          <div class="axis-control">
+            <label>Y Axis:</label>
+            <div class="direction-buttons">
+              <button @click="moveObject('y', -moveStep)" class="direction-btn">↓</button>
+              <button @click="moveObject('y', moveStep)" class="direction-btn">↑</button>
+            </div>
+          </div>
+          
+          <div class="axis-control">
+            <label>Z Axis:</label>
+            <div class="direction-buttons">
+              <button @click="moveObject('z', moveStep)" class="direction-btn">←</button>
+              <button @click="moveObject('z', -moveStep)" class="direction-btn">→</button>
+            </div>
           </div>
         </div>
         
-        <div class="axis-control">
-          <label>Y Axis:</label>
-          <div class="direction-buttons">
-            <button @click="moveObject('y', -moveStep)" class="direction-btn">↓</button>
-            <button @click="moveObject('y', moveStep)" class="direction-btn">↑</button>
+        <div class="control-section">
+          <h5>Rotation</h5>
+          <div class="axis-control">
+            <label>X Axis:</label>
+            <div class="direction-buttons">
+              <button @click="rotateObject('x', -moveStep * 15)" class="direction-btn rotation-btn">↻</button>
+              <button @click="rotateObject('x', moveStep * 15)" class="direction-btn rotation-btn">↺</button>
+            </div>
           </div>
-        </div>
-        
-        <div class="axis-control">
-          <label>Z Axis:</label>
-          <div class="direction-buttons">
-            <button @click="moveObject('z', moveStep)" class="direction-btn">←</button>
-            <button @click="moveObject('z', -moveStep)" class="direction-btn">→</button>
+          
+          <div class="axis-control">
+            <label>Y Axis:</label>
+            <div class="direction-buttons">
+              <button @click="rotateObject('y', -moveStep * 15)" class="direction-btn rotation-btn">↻</button>
+              <button @click="rotateObject('y', moveStep * 15)" class="direction-btn rotation-btn">↺</button>
+            </div>
+          </div>
+          
+          <div class="axis-control">
+            <label>Z Axis:</label>
+            <div class="direction-buttons">
+              <button @click="rotateObject('z', -moveStep * 15)" class="direction-btn rotation-btn">↻</button>
+              <button @click="rotateObject('z', moveStep * 15)" class="direction-btn rotation-btn">↺</button>
+            </div>
           </div>
         </div>
         
@@ -55,9 +85,17 @@
           </select>
         </div>
         
-        <button @click="resetObjectPosition" class="control-button reset-btn">
-          Reset Position
-        </button>
+        <div class="reset-controls">
+          <button @click="resetObjectPosition" class="control-button reset-btn small">
+            Reset Position
+          </button>
+          <button @click="resetObjectRotation" class="control-button reset-btn small">
+            Reset Rotation
+          </button>
+          <button @click="resetObjectTransform" class="control-button reset-btn">
+            Reset All
+          </button>
+        </div>
       </div>
     </div>
   </div>
@@ -89,7 +127,7 @@ export default {
       required: false
     }
   },
-  emits: ['model-position-changed'],
+  emits: ['model-position-changed', 'model-rotation-changed'],
   setup(props, { emit }) {
     const container = ref(null);
     const isLoading = ref(true);
@@ -334,6 +372,25 @@ export default {
       emit('model-position-changed', { modelId, position: newPosition });
     };
     
+    // Rotate selected object
+    const rotateObject = (axis, delta) => {
+      if (!selectedObject.value) return;
+      
+      // Convert delta from degrees to radians
+      const radians = THREE.MathUtils.degToRad(delta);
+      selectedObject.value.rotation[axis] += radians;
+      
+      // Emit rotation change event (convert back to degrees for consistency)
+      const modelId = selectedObject.value.userData.modelId;
+      const newRotation = {
+        x: THREE.MathUtils.radToDeg(selectedObject.value.rotation.x),
+        y: THREE.MathUtils.radToDeg(selectedObject.value.rotation.y),
+        z: THREE.MathUtils.radToDeg(selectedObject.value.rotation.z)
+      };
+      
+      emit('model-rotation-changed', { modelId, rotation: newRotation });
+    };
+    
     // Reset selected object position
     const resetObjectPosition = () => {
       if (!selectedObject.value) return;
@@ -345,6 +402,25 @@ export default {
         modelId, 
         position: { x: 0, y: 0, z: 0 } 
       });
+    };
+    
+    // Reset selected object rotation
+    const resetObjectRotation = () => {
+      if (!selectedObject.value) return;
+      
+      selectedObject.value.rotation.set(0, 0, 0);
+      
+      const modelId = selectedObject.value.userData.modelId;
+      emit('model-rotation-changed', { 
+        modelId, 
+        rotation: { x: 0, y: 0, z: 0 } 
+      });
+    };
+    
+    // Reset both position and rotation
+    const resetObjectTransform = () => {
+      resetObjectPosition();
+      resetObjectRotation();
     };
     
     // Load a model
@@ -691,7 +767,10 @@ export default {
       toggleGrid,
       toggleEditMode,
       moveObject,
-      resetObjectPosition
+      rotateObject,
+      resetObjectPosition,
+      resetObjectRotation,
+      resetObjectTransform
     };
   }
 };
@@ -767,8 +846,10 @@ export default {
   padding: 15px;
   border-radius: 8px;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-  min-width: 250px;
-  max-width: 300px;
+  min-width: 280px;
+  max-width: 320px;
+  max-height: 80vh;
+  overflow-y: auto;
 }
 
 .selected-object-info {
@@ -793,6 +874,29 @@ export default {
   display: flex;
   flex-direction: column;
   gap: 12px;
+}
+
+.control-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 15px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid #eee;
+}
+
+.control-section:last-child {
+  border-bottom: none;
+  margin-bottom: 0;
+}
+
+.control-section h5 {
+  margin: 0 0 8px 0;
+  color: #333;
+  font-size: 13px;
+  font-weight: bold;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
 }
 
 .axis-control {
@@ -837,10 +941,26 @@ export default {
   color: white;
 }
 
+.rotation-btn {
+  background-color: #f8f9fa;
+  border-color: #e3f2fd;
+  color: #1976d2;
+}
+
+.rotation-btn:hover {
+  background-color: #e3f2fd;
+  border-color: #1976d2;
+}
+
+.rotation-btn:active {
+  background-color: #1976d2;
+  color: white;
+}
+
 .step-control {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  gap: 8px;
 }
 
 .step-control label {
@@ -854,6 +974,27 @@ export default {
   border: 1px solid #ddd;
   border-radius: 4px;
   font-size: 12px;
+}
+
+.reset-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 15px;
+}
+
+.reset-controls .small {
+  font-size: 11px;
+  padding: 4px 8px;
+  background-color: #f0f0f0;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background-color 0.2s;
+}
+
+.reset-controls .small:hover {
+  background-color: #e0e0e0;
 }
 
 .reset-btn {
