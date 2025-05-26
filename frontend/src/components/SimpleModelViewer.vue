@@ -8,6 +8,57 @@
     <div class="scene-controls">
       <button @click="resetCamera" class="control-button">Reset View</button>
       <button @click="toggleGrid" class="control-button">{{ showGrid ? 'Hide' : 'Show' }} Grid</button>
+      <button @click="toggleEditMode" class="control-button" :class="{ 'active': editMode }">
+        {{ editMode ? 'Exit Edit' : 'Edit Mode' }}
+      </button>
+    </div>
+    
+    <!-- Edit Mode Controls -->
+    <div v-if="editMode" class="edit-controls">
+      <div class="selected-object-info">
+        <h4>{{ selectedObject ? `Selected: ${selectedObject.userData.modelName}` : 'No object selected' }}</h4>
+        <p v-if="!selectedObject">Click on a model to select it</p>
+      </div>
+      
+      <div v-if="selectedObject" class="movement-controls">
+        <div class="axis-control">
+          <label>X Axis:</label>
+          <div class="direction-buttons">
+            <button @click="moveObject('x', -moveStep)" class="direction-btn">←</button>
+            <button @click="moveObject('x', moveStep)" class="direction-btn">→</button>
+          </div>
+        </div>
+        
+        <div class="axis-control">
+          <label>Y Axis:</label>
+          <div class="direction-buttons">
+            <button @click="moveObject('y', -moveStep)" class="direction-btn">↓</button>
+            <button @click="moveObject('y', moveStep)" class="direction-btn">↑</button>
+          </div>
+        </div>
+        
+        <div class="axis-control">
+          <label>Z Axis:</label>
+          <div class="direction-buttons">
+            <button @click="moveObject('z', moveStep)" class="direction-btn">←</button>
+            <button @click="moveObject('z', -moveStep)" class="direction-btn">→</button>
+          </div>
+        </div>
+        
+        <div class="step-control">
+          <label>Step Size:</label>
+          <select v-model="moveStep">
+            <option value="0.1">0.1</option>
+            <option value="0.5">0.5</option>
+            <option value="1">1.0</option>
+            <option value="2">2.0</option>
+          </select>
+        </div>
+        
+        <button @click="resetObjectPosition" class="control-button reset-btn">
+          Reset Position
+        </button>
+      </div>
     </div>
   </div>
 </template>
@@ -38,10 +89,14 @@ export default {
       required: false
     }
   },
-  setup(props) {
+  emits: ['model-position-changed'],
+  setup(props, { emit }) {
     const container = ref(null);
     const isLoading = ref(true);
     const showGrid = ref(true);
+    const editMode = ref(false);
+    const selectedObject = ref(null);
+    const moveStep = ref(1);
     
     // Create a computed prop that handles both the new models array and the legacy modelPath/modelFormat props
     const modelsToLoad = computed(() => {
@@ -65,7 +120,9 @@ export default {
 
     // Scene objects
     let scene, camera, renderer, controls, gridHelper;
-    let animationFrameId = null; // Track animation frame ID
+    let animationFrameId = null;
+    let raycaster, mouse;
+    let highlightMaterial, originalMaterials = new Map();
     
     // Map to track loaded models - key: modelId, value: THREE.Object3D
     const loadedModels = reactive(new Map());
@@ -109,6 +166,22 @@ export default {
       }
       
       container.value.appendChild(renderer.domElement);
+      
+      // Initialize raycaster and mouse for object selection
+      raycaster = new THREE.Raycaster();
+      mouse = new THREE.Vector2();
+      
+      // Create highlight material for selected objects
+      highlightMaterial = new THREE.MeshStandardMaterial({
+        color: 0xff6b00,
+        transparent: true,
+        opacity: 0.8,
+        emissive: 0xff6b00,
+        emissiveIntensity: 0.3
+      });
+      
+      // Add click event listener for object selection
+      renderer.domElement.addEventListener('click', onMouseClick, false);
       
       // Add lights
       const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
@@ -159,6 +232,121 @@ export default {
       controls.update();
     };
     
+    // Handle mouse click for object selection
+    const onMouseClick = (event) => {
+      if (!editMode.value) return;
+      
+      const rect = renderer.domElement.getBoundingClientRect();
+      mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+      mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+      
+      raycaster.setFromCamera(mouse, camera);
+      
+      const selectableObjects = [];
+      loadedModels.forEach(model => {
+        model.traverse(child => {
+          if (child.isMesh) {
+            selectableObjects.push(child);
+          }
+        });
+      });
+      
+      const intersects = raycaster.intersectObjects(selectableObjects);
+      
+      if (intersects.length > 0) {
+        const clickedObject = intersects[0].object;
+        // Find the parent model object
+        let parentModel = clickedObject;
+        while (parentModel.parent && !loadedModels.has(parentModel.userData.modelId)) {
+          parentModel = parentModel.parent;
+        }
+        
+        selectObject(parentModel);
+      } else {
+        selectObject(null);
+      }
+    };
+    
+    // Select/deselect object
+    const selectObject = (object) => {
+      // Restore previous object's material
+      if (selectedObject.value) {
+        restoreObjectMaterial(selectedObject.value);
+      }
+      
+      selectedObject.value = object;
+      
+      // Highlight new selected object
+      if (selectedObject.value) {
+        highlightObject(selectedObject.value);
+      }
+    };
+    
+    // Highlight selected object
+    const highlightObject = (object) => {
+      object.traverse(child => {
+        if (child.isMesh) {
+          if (!originalMaterials.has(child)) {
+            originalMaterials.set(child, child.material);
+          }
+          child.material = highlightMaterial;
+        }
+      });
+    };
+    
+    // Restore object's original material
+    const restoreObjectMaterial = (object) => {
+      object.traverse(child => {
+        if (child.isMesh && originalMaterials.has(child)) {
+          child.material = originalMaterials.get(child);
+        }
+      });
+    };
+    
+    // Toggle edit mode
+    const toggleEditMode = () => {
+      editMode.value = !editMode.value;
+      
+      if (!editMode.value) {
+        selectObject(null);
+      }
+      
+      // Enable/disable orbit controls when in edit mode
+      if (controls) {
+        controls.enabled = !editMode.value;
+      }
+    };
+    
+    // Move selected object
+    const moveObject = (axis, delta) => {
+      if (!selectedObject.value) return;
+      
+      selectedObject.value.position[axis] += delta;
+      
+      // Emit position change event
+      const modelId = selectedObject.value.userData.modelId;
+      const newPosition = {
+        x: selectedObject.value.position.x,
+        y: selectedObject.value.position.y,
+        z: selectedObject.value.position.z
+      };
+      
+      emit('model-position-changed', { modelId, position: newPosition });
+    };
+    
+    // Reset selected object position
+    const resetObjectPosition = () => {
+      if (!selectedObject.value) return;
+      
+      selectedObject.value.position.set(0, 0, 0);
+      
+      const modelId = selectedObject.value.userData.modelId;
+      emit('model-position-changed', { 
+        modelId, 
+        position: { x: 0, y: 0, z: 0 } 
+      });
+    };
+    
     // Load a model
     const loadModel = async (modelData) => {
       // Get the model path - supporting both modelPath and modelUrl properties
@@ -193,6 +381,10 @@ export default {
             }
           );
         });
+        
+        // Store model metadata
+        object.userData.modelId = modelData.id;
+        object.userData.modelName = modelData.name || `Model ${modelData.id}`;
         
         // Apply material/color if specified
         if (modelData.color) {
@@ -377,6 +569,11 @@ export default {
         animationFrameId = null;
       }
       
+      // Remove event listeners
+      if (renderer && renderer.domElement) {
+        renderer.domElement.removeEventListener('click', onMouseClick);
+      }
+      
       // Dispose of all loaded models
       if (loadedModels) {
         loadedModels.forEach((model) => {
@@ -400,6 +597,9 @@ export default {
         });
         loadedModels.clear();
       }
+      
+      // Clear material maps
+      originalMaterials.clear();
       
       // Remove grid helper
       if (gridHelper && scene) {
@@ -484,8 +684,14 @@ export default {
       container,
       isLoading,
       showGrid,
+      editMode,
+      selectedObject,
+      moveStep,
       resetCamera,
-      toggleGrid
+      toggleGrid,
+      toggleEditMode,
+      moveObject,
+      resetObjectPosition
     };
   }
 };
@@ -495,9 +701,9 @@ export default {
 .model-viewer-container {
   position: relative;
   width: 100%;
-  height: 70vh; /* Reduced height to prevent taking over viewport */
+  height: 70vh;
   min-height: 600px;
-  min-width: 800px; /* Ensure a minimum width */
+  min-width: 800px;
   max-width: 100%;
   margin: 0 auto;
   border: 1px solid #ddd;
@@ -547,5 +753,116 @@ export default {
 
 .control-button:hover {
   background-color: rgba(0, 0, 0, 0.7);
+}
+
+.control-button.active {
+  background-color: #ff6b00;
+}
+
+.edit-controls {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  background-color: rgba(255, 255, 255, 0.95);
+  padding: 15px;
+  border-radius: 8px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  min-width: 250px;
+  max-width: 300px;
+}
+
+.selected-object-info {
+  margin-bottom: 15px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid #eee;
+}
+
+.selected-object-info h4 {
+  margin: 0 0 5px 0;
+  color: #333;
+  font-size: 14px;
+}
+
+.selected-object-info p {
+  margin: 0;
+  color: #666;
+  font-size: 12px;
+}
+
+.movement-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.axis-control {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.axis-control label {
+  font-weight: bold;
+  color: #333;
+  font-size: 12px;
+  min-width: 40px;
+}
+
+.direction-buttons {
+  display: flex;
+  gap: 4px;
+}
+
+.direction-btn {
+  width: 32px;
+  height: 32px;
+  border: 1px solid #ddd;
+  background-color: white;
+  border-radius: 4px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 16px;
+  transition: all 0.2s;
+}
+
+.direction-btn:hover {
+  background-color: #f0f0f0;
+  border-color: #2196f3;
+}
+
+.direction-btn:active {
+  background-color: #2196f3;
+  color: white;
+}
+
+.step-control {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.step-control label {
+  font-weight: bold;
+  color: #333;
+  font-size: 12px;
+}
+
+.step-control select {
+  padding: 4px 8px;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  font-size: 12px;
+}
+
+.reset-btn {
+  background-color: #f44336 !important;
+  font-size: 12px;
+  padding: 6px 12px;
+}
+
+.reset-btn:hover {
+  background-color: #d32f2f !important;
 }
 </style>

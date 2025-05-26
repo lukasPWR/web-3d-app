@@ -22,7 +22,7 @@ import { RouterLink, RouterView } from "vue-router";
 <style>
 /* Global styles to ensure proper sizing of the 3D viewer */
 body, html {
-  margin: ;
+  margin: 0;
   padding: 0;
   height: 100%;
   width: 100%;

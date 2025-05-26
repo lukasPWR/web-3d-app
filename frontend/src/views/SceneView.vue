@@ -8,6 +8,7 @@
     <div class="scene-container">
       <SimpleModelViewer 
         :models="selectedModels"
+        @model-position-changed="handleModelPositionChanged"
         v-if="selectedModels.length > 0"
       />
       <div v-else class="empty-scene">
@@ -38,8 +39,17 @@ export default {
   setup() {
     const selectedModels = ref([]);
     
+    // Handle position changes from edit mode
+    const handleModelPositionChanged = ({ modelId, position }) => {
+      const modelIndex = selectedModels.value.findIndex(model => model.id === modelId);
+      if (modelIndex !== -1) {
+        selectedModels.value[modelIndex].position = position;
+      }
+    };
+    
     return {
-      selectedModels
+      selectedModels,
+      handleModelPositionChanged
     };
   }
 };

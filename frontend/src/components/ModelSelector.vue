@@ -35,6 +35,9 @@
     
     <div v-if="selectedModels.length > 0" class="selected-models">
       <h3>Selected Models</h3>
+      <div class="edit-mode-info">
+        <p><strong>💡 Tip:</strong> Use "Edit Mode" in the 3D viewer to move objects by clicking and using arrow controls!</p>
+      </div>
       <div class="selected-models-list">
         <div 
           v-for="model in selectedModels" 
@@ -58,24 +61,27 @@
                 <div class="position-inputs">
                   <input 
                     type="number" 
-                    step="1" 
-                    :value="model.position?.x || 0"
+                    step="0.1" 
+                    :value="(model.position?.x || 0).toFixed(1)"
                     @input="updateModelPosition(model.id, 'x', parseFloat($event.target.value))"
                     placeholder="X"
+                    title="X Position"
                   />
                   <input 
                     type="number" 
-                    step="1" 
-                    :value="model.position?.y || 0" 
+                    step="0.1" 
+                    :value="(model.position?.y || 0).toFixed(1)" 
                     @input="updateModelPosition(model.id, 'y', parseFloat($event.target.value))"
                     placeholder="Y"
+                    title="Y Position"
                   />
                   <input 
                     type="number" 
-                    step="1" 
-                    :value="model.position?.z || 0" 
+                    step="0.1" 
+                    :value="(model.position?.z || 0).toFixed(1)" 
                     @input="updateModelPosition(model.id, 'z', parseFloat($event.target.value))"
                     placeholder="Z"
+                    title="Z Position"
                   />
                 </div>
               </div>
@@ -385,8 +391,15 @@ h2 {
 }
 
 .position-inputs input {
-  width: 50px;
+  width: 60px;
   text-align: center;
+  font-size: 12px;
+}
+
+.position-inputs input:focus {
+  border-color: #2196f3;
+  outline: none;
+  box-shadow: 0 0 3px rgba(33, 150, 243, 0.3);
 }
 
 input[type="number"] {
@@ -410,5 +423,19 @@ button {
   border-radius: 4px;
   cursor: pointer;
   transition: background-color 0.2s;
+}
+
+.edit-mode-info {
+  background-color: #e3f2fd;
+  border: 1px solid #2196f3;
+  border-radius: 6px;
+  padding: 12px;
+  margin-bottom: 15px;
+}
+
+.edit-mode-info p {
+  margin: 0;
+  color: #1976d2;
+  font-size: 14px;
 }
 </style>
