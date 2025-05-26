@@ -12,6 +12,7 @@
           @model-position-changed="handleModelPositionChanged"
           @model-rotation-changed="handleModelRotationChanged"
           @model-scale-changed="handleModelScaleChanged"
+          @model-material-changed="handleModelMaterialChanged"
           v-if="selectedModels.length > 0"
         />
         <div v-else class="empty-scene">
@@ -67,11 +68,22 @@ export default {
       }
     };
     
+    // Handle material changes from edit mode
+    const handleModelMaterialChanged = ({ modelId, material }) => {
+      const modelIndex = selectedModels.value.findIndex(model => model.id === modelId);
+      if (modelIndex !== -1) {
+        selectedModels.value[modelIndex].material = material;
+        // Also update the color property for consistency
+        selectedModels.value[modelIndex].color = material.color;
+      }
+    };
+    
     return {
       selectedModels,
       handleModelPositionChanged,
       handleModelRotationChanged,
-      handleModelScaleChanged
+      handleModelScaleChanged,
+      handleModelMaterialChanged
     };
   }
 };

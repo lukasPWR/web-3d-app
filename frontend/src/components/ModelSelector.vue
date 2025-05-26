@@ -129,6 +129,39 @@
                 />
               </div>
               
+              <div class="material-controls">
+                <label>Material:</label>
+                <div class="material-inputs">
+                  <div class="material-input-group">
+                    <label>Roughness:</label>
+                    <input 
+                      type="range" 
+                      min="0" 
+                      max="1" 
+                      step="0.1"
+                      :value="model.material?.roughness || 0.7"
+                      @input="updateModelMaterial(model.id, 'roughness', parseFloat($event.target.value))"
+                      class="material-slider"
+                    />
+                    <span>{{ (model.material?.roughness || 0.7).toFixed(1) }}</span>
+                  </div>
+                  
+                  <div class="material-input-group">
+                    <label>Metalness:</label>
+                    <input 
+                      type="range" 
+                      min="0" 
+                      max="1" 
+                      step="0.1"
+                      :value="model.material?.metalness || 0.1"
+                      @input="updateModelMaterial(model.id, 'metalness', parseFloat($event.target.value))"
+                      class="material-slider"
+                    />
+                    <span>{{ (model.material?.metalness || 0.1).toFixed(1) }}</span>
+                  </div>
+                </div>
+              </div>
+              
               <button 
                 class="remove-button" 
                 @click.stop="removeModel(model.id)"
@@ -261,6 +294,20 @@ export default {
       emit('update:selected-models', updatedSelection);
     };
     
+    // Update model material properties
+    const updateModelMaterial = (modelId, property, value) => {
+      const updatedSelection = props.selectedModels.map(model => {
+        if (model.id === modelId) {
+          const material = { ...(model.material || { roughness: 0.7, metalness: 0.1 }) };
+          material[property] = value;
+          return { ...model, material };
+        }
+        return model;
+      });
+      
+      emit('update:selected-models', updatedSelection);
+    };
+    
     onMounted(fetchModels);
     
     return {
@@ -273,7 +320,8 @@ export default {
       updateModelColor,
       updateModelPosition,
       updateModelRotation,
-      updateModelScale
+      updateModelScale,
+      updateModelMaterial
     };
   }
 };
@@ -484,5 +532,44 @@ button {
   margin: 0;
   color: #1976d2;
   font-size: 14px;
+}
+
+.material-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.material-inputs {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.material-input-group {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 12px;
+}
+
+.material-input-group label {
+  min-width: 60px;
+  font-size: 11px;
+}
+
+.material-slider {
+  flex: 1;
+  min-width: 80px;
+}
+
+.material-input-group span {
+  min-width: 25px;
+  text-align: center;
+  font-size: 10px;
+  background-color: #f8f9fa;
+  padding: 2px 4px;
+  border-radius: 2px;
+  border: 1px solid #ddd;
 }
 </style>

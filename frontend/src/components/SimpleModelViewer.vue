@@ -90,6 +90,71 @@
             </div>
           </div>
           
+          <div class="control-section">
+            <h5>Material</h5>
+            <div class="axis-control">
+              <label>Color:</label>
+              <input 
+                type="color" 
+                :value="selectedObjectMaterial.color" 
+                @input="updateMaterialColor($event.target.value)"
+                class="material-color-picker"
+              />
+            </div>
+            
+            <div class="axis-control">
+              <label>Roughness:</label>
+              <input 
+                type="range" 
+                min="0" 
+                max="1" 
+                step="0.1"
+                :value="selectedObjectMaterial.roughness" 
+                @input="updateMaterialProperty('roughness', parseFloat($event.target.value))"
+                class="material-slider"
+              />
+              <span class="value-display">{{ selectedObjectMaterial.roughness.toFixed(1) }}</span>
+            </div>
+            
+            <div class="axis-control">
+              <label>Metalness:</label>
+              <input 
+                type="range" 
+                min="0" 
+                max="1" 
+                step="0.1"
+                :value="selectedObjectMaterial.metalness" 
+                @input="updateMaterialProperty('metalness', parseFloat($event.target.value))"
+                class="material-slider"
+              />
+              <span class="value-display">{{ selectedObjectMaterial.metalness.toFixed(1) }}</span>
+            </div>
+            
+            <div class="axis-control">
+              <label>Emission:</label>
+              <input 
+                type="color" 
+                :value="selectedObjectMaterial.emissive" 
+                @input="updateMaterialEmissive($event.target.value)"
+                class="material-color-picker"
+              />
+            </div>
+            
+            <div class="axis-control">
+              <label>Glow:</label>
+              <input 
+                type="range" 
+                min="0" 
+                max="1" 
+                step="0.1"
+                :value="selectedObjectMaterial.emissiveIntensity" 
+                @input="updateMaterialProperty('emissiveIntensity', parseFloat($event.target.value))"
+                class="material-slider"
+              />
+              <span class="value-display">{{ selectedObjectMaterial.emissiveIntensity.toFixed(1) }}</span>
+            </div>
+          </div>
+          
           <div class="step-control">
             <label>Step Size:</label>
             <select v-model="moveStep">
@@ -143,7 +208,7 @@ export default {
       required: false
     }
   },
-  emits: ['model-position-changed', 'model-rotation-changed', 'model-scale-changed'],
+  emits: ['model-position-changed', 'model-rotation-changed', 'model-scale-changed', 'model-material-changed'],
   setup(props, { emit }) {
     const container = ref(null);
     const isLoading = ref(true);
@@ -151,6 +216,15 @@ export default {
     const editMode = ref(false);
     const selectedObject = ref(null);
     const moveStep = ref(1);
+    
+    // Material properties for selected object
+    const selectedObjectMaterial = ref({
+      color: '#cccccc',
+      roughness: 0.7,
+      metalness: 0.1,
+      emissive: '#000000',
+      emissiveIntensity: 0.0
+    });
     
     // Create a computed prop that handles both the new models array and the legacy modelPath/modelFormat props
     const modelsToLoad = computed(() => {
@@ -330,10 +404,97 @@ export default {
       
       selectedObject.value = object;
       
-      // Highlight new selected object
+      // Update material properties display
       if (selectedObject.value) {
+        updateMaterialDisplay();
         highlightObject(selectedObject.value);
       }
+    };
+    
+    // Update material display values
+    const updateMaterialDisplay = () => {
+      if (!selectedObject.value) return;
+      
+      // Find the first mesh to get material properties
+      let meshMaterial = null;
+      selectedObject.value.traverse(child => {
+        if (child.isMesh && !meshMaterial) {
+          meshMaterial = originalMaterials.get(child) || child.material;
+        }
+      });
+      
+      if (meshMaterial) {
+        selectedObjectMaterial.value = {
+          color: '#' + meshMaterial.color.getHexString(),
+          roughness: meshMaterial.roughness || 0.7,
+          metalness: meshMaterial.metalness || 0.1,
+          emissive: '#' + meshMaterial.emissive.getHexString(),
+          emissiveIntensity: meshMaterial.emissiveIntensity || 0.0
+        };
+      }
+    };
+    
+    // Update material color
+    const updateMaterialColor = (colorHex) => {
+      if (!selectedObject.value) return;
+      
+      selectedObjectMaterial.value.color = colorHex;
+      
+      selectedObject.value.traverse(child => {
+        if (child.isMesh) {
+          const material = originalMaterials.get(child);
+          if (material) {
+            material.color.setHex(colorHex.replace('#', '0x'));
+          }
+        }
+      });
+      
+      emitMaterialChange();
+    };
+    
+    // Update material emissive color
+    const updateMaterialEmissive = (colorHex) => {
+      if (!selectedObject.value) return;
+      
+      selectedObjectMaterial.value.emissive = colorHex;
+      
+      selectedObject.value.traverse(child => {
+        if (child.isMesh) {
+          const material = originalMaterials.get(child);
+          if (material) {
+            material.emissive.setHex(colorHex.replace('#', '0x'));
+          }
+        }
+      });
+      
+      emitMaterialChange();
+    };
+    
+    // Update material property (roughness, metalness, emissiveIntensity)
+    const updateMaterialProperty = (property, value) => {
+      if (!selectedObject.value) return;
+      
+      selectedObjectMaterial.value[property] = value;
+      
+      selectedObject.value.traverse(child => {
+        if (child.isMesh) {
+          const material = originalMaterials.get(child);
+          if (material && material[property] !== undefined) {
+            material[property] = value;
+          }
+        }
+      });
+      
+      emitMaterialChange();
+    };
+    
+    // Emit material change event
+    const emitMaterialChange = () => {
+      const modelId = selectedObject.value.userData.modelId;
+      emit('model-material-changed', { 
+        modelId, 
+        material: { ...selectedObjectMaterial.value } 
+      });
     };
     
     // Highlight selected object
@@ -802,6 +963,7 @@ export default {
       editMode,
       selectedObject,
       moveStep,
+      selectedObjectMaterial,
       resetCamera,
       toggleGrid,
       toggleEditMode,
@@ -810,7 +972,10 @@ export default {
       resetObjectPosition,
       resetObjectRotation,
       resetObjectTransform,
-      scaleObject
+      scaleObject,
+      updateMaterialColor,
+      updateMaterialEmissive,
+      updateMaterialProperty
     };
   }
 };
@@ -1084,5 +1249,29 @@ export default {
 .scale-btn:active {
   background-color: #4caf50;
   color: white;
+}
+
+.material-color-picker {
+  width: 40px;
+  height: 30px;
+  border: 1px solid #ddd;
+  border-radius: 3px;
+  cursor: pointer;
+  padding: 0;
+}
+
+.material-slider {
+  flex: 1;
+  margin: 0 8px;
+}
+
+.value-display {
+  min-width: 30px;
+  text-align: center;
+  font-size: 11px;
+  background-color: #f8f9fa;
+  border: 1px solid #ddd;
+  border-radius: 3px;
+  padding: 2px 4px;
 }
 </style>
