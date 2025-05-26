@@ -13,6 +13,19 @@
           {{ editMode ? 'Exit Edit' : 'Edit Mode' }}
         </button>
       </div>
+      
+      <!-- Mouse Controls Info -->
+      <div v-if="editMode" class="mouse-controls-info">
+        <div class="controls-help">
+          <h5>Mouse Controls:</h5>
+          <ul>
+            <li><strong>Drag:</strong> Move object in screen plane</li>
+            <li><strong>Shift + Drag:</strong> Rotate object</li>
+            <li><strong>Ctrl + Drag:</strong> Move along Z-axis</li>
+            <li><strong>Scroll:</strong> Scale object</li>
+          </ul>
+        </div>
+      </div>
     </div>
     
     <!-- Edit Mode Controls - Now as sidebar -->
@@ -26,6 +39,9 @@
         <div v-if="selectedObject" class="movement-controls">
           <div class="control-section">
             <h5>Position</h5>
+            <div class="control-hint">
+              <span>💡 Drag object directly or use buttons below</span>
+            </div>
             <div class="axis-control">
               <label>X Axis:</label>
               <div class="direction-buttons">
@@ -53,6 +69,9 @@
           
           <div class="control-section">
             <h5>Rotation</h5>
+            <div class="control-hint">
+              <span>💡 Hold Shift + Drag for rotation or use buttons below</span>
+            </div>
             <div class="axis-control">
               <label>X Axis:</label>
               <div class="direction-buttons">
@@ -80,6 +99,9 @@
           
           <div class="control-section">
             <h5>Scale</h5>
+            <div class="control-hint">
+              <span>💡 Use mouse wheel or buttons below</span>
+            </div>
             <div class="axis-control">
               <label>Size:</label>
               <div class="scale-buttons">
@@ -252,6 +274,15 @@ export default {
     let raycaster, mouse;
     let highlightMaterial, originalMaterials = new Map();
     
+    // Mouse control state
+    let isDragging = false;
+    let dragStartMouse = new THREE.Vector2();
+    let dragStartPosition = new THREE.Vector3();
+    let dragStartRotation = new THREE.Vector3();
+    let dragPlane = new THREE.Plane();
+    let dragPlaneHelper = new THREE.PlaneHelper(dragPlane, 10, 0x00ff00);
+    dragPlaneHelper.visible = false;
+    
     // Map to track loaded models - key: modelId, value: THREE.Object3D
     const loadedModels = reactive(new Map());
     
@@ -310,6 +341,11 @@ export default {
       
       // Add click event listener for object selection
       renderer.domElement.addEventListener('click', onMouseClick, false);
+      renderer.domElement.addEventListener('mousedown', onMouseDown, false);
+      renderer.domElement.addEventListener('mousemove', onMouseMove, false);
+      renderer.domElement.addEventListener('mouseup', onMouseUp, false);
+      renderer.domElement.addEventListener('wheel', onMouseWheel, false);
+      renderer.domElement.addEventListener('contextmenu', (e) => e.preventDefault(), false);
       
       // Add lights
       const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
@@ -362,7 +398,7 @@ export default {
     
     // Handle mouse click for object selection
     const onMouseClick = (event) => {
-      if (!editMode.value) return;
+      if (!editMode.value || isDragging) return;
       
       const rect = renderer.domElement.getBoundingClientRect();
       mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
@@ -393,6 +429,161 @@ export default {
       } else {
         selectObject(null);
       }
+    };
+    
+    // Handle mouse down for dragging
+    const onMouseDown = (event) => {
+      if (!editMode.value || !selectedObject.value) return;
+      
+      event.preventDefault();
+      
+      const rect = renderer.domElement.getBoundingClientRect();
+      mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+      mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+      
+      raycaster.setFromCamera(mouse, camera);
+      
+      // Check if we're clicking on the selected object
+      const selectableObjects = [];
+      selectedObject.value.traverse(child => {
+        if (child.isMesh) {
+          selectableObjects.push(child);
+        }
+      });
+      
+      const intersects = raycaster.intersectObjects(selectableObjects);
+      
+      if (intersects.length > 0) {
+        isDragging = true;
+        dragStartMouse.copy(mouse);
+        dragStartPosition.copy(selectedObject.value.position);
+        dragStartRotation.copy(selectedObject.value.rotation);
+        
+        // Create drag plane based on camera orientation
+        const cameraDirection = new THREE.Vector3();
+        camera.getWorldDirection(cameraDirection);
+        
+        // Use the object's position as the plane point
+        const objectPosition = selectedObject.value.position.clone();
+        
+        // Create plane perpendicular to camera
+        dragPlane.setFromNormalAndCoplanarPoint(cameraDirection, objectPosition);
+        
+        // Disable orbit controls while dragging
+        if (controls) {
+          controls.enabled = false;
+        }
+        
+        // Change cursor
+        renderer.domElement.style.cursor = event.shiftKey ? 'grab' : 'move';
+      }
+    };
+    
+    // Handle mouse move for dragging
+    const onMouseMove = (event) => {
+      if (!editMode.value || !isDragging || !selectedObject.value) return;
+      
+      event.preventDefault();
+      
+      const rect = renderer.domElement.getBoundingClientRect();
+      mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+      mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+      
+      const mouseDelta = new THREE.Vector2().subVectors(mouse, dragStartMouse);
+      
+      if (event.shiftKey) {
+        // Rotation mode with Shift key
+        const rotationSpeed = 2;
+        const deltaRotationX = mouseDelta.y * rotationSpeed;
+        const deltaRotationY = mouseDelta.x * rotationSpeed;
+        
+        selectedObject.value.rotation.x = dragStartRotation.x + deltaRotationX;
+        selectedObject.value.rotation.y = dragStartRotation.y + deltaRotationY;
+        
+        // Emit rotation change
+        const modelId = selectedObject.value.userData.modelId;
+        const newRotation = {
+          x: THREE.MathUtils.radToDeg(selectedObject.value.rotation.x),
+          y: THREE.MathUtils.radToDeg(selectedObject.value.rotation.y),
+          z: THREE.MathUtils.radToDeg(selectedObject.value.rotation.z)
+        };
+        emit('model-rotation-changed', { modelId, rotation: newRotation });
+        
+      } else if (event.ctrlKey || event.metaKey) {
+        // Z-axis movement with Ctrl/Cmd key
+        const moveSpeed = 5;
+        const deltaZ = mouseDelta.y * moveSpeed;
+        
+        selectedObject.value.position.z = dragStartPosition.z - deltaZ;
+        
+        // Emit position change
+        const modelId = selectedObject.value.userData.modelId;
+        const newPosition = {
+          x: selectedObject.value.position.x,
+          y: selectedObject.value.position.y,
+          z: selectedObject.value.position.z
+        };
+        emit('model-position-changed', { modelId, position: newPosition });
+        
+      } else {
+        // Normal dragging in screen space
+        raycaster.setFromCamera(mouse, camera);
+        
+        const intersection = new THREE.Vector3();
+        if (raycaster.ray.intersectPlane(dragPlane, intersection)) {
+          const dragPlaneStart = new THREE.Vector3();
+          const startRaycaster = new THREE.Raycaster();
+          startRaycaster.setFromCamera(dragStartMouse, camera);
+          
+          if (startRaycaster.ray.intersectPlane(dragPlane, dragPlaneStart)) {
+            const movement = intersection.sub(dragPlaneStart);
+            selectedObject.value.position.copy(dragStartPosition).add(movement);
+            
+            // Emit position change
+            const modelId = selectedObject.value.userData.modelId;
+            const newPosition = {
+              x: selectedObject.value.position.x,
+              y: selectedObject.value.position.y,
+              z: selectedObject.value.position.z
+            };
+            emit('model-position-changed', { modelId, position: newPosition });
+          }
+        }
+      }
+    };
+    
+    // Handle mouse up
+    const onMouseUp = (event) => {
+      if (isDragging) {
+        isDragging = false;
+        
+        // Re-enable orbit controls
+        if (controls) {
+          controls.enabled = true;
+        }
+        
+        // Reset cursor
+        renderer.domElement.style.cursor = 'default';
+      }
+    };
+    
+    // Handle mouse wheel for scaling
+    const onMouseWheel = (event) => {
+      if (!editMode.value || !selectedObject.value) return;
+      
+      event.preventDefault();
+      
+      const scaleSpeed = 0.1;
+      const delta = event.deltaY > 0 ? -scaleSpeed : scaleSpeed;
+      
+      const currentScale = selectedObject.value.scale.x;
+      const newScale = Math.max(0.1, currentScale + delta);
+      
+      selectedObject.value.scale.set(newScale, newScale, newScale);
+      
+      // Emit scale change
+      const modelId = selectedObject.value.userData.modelId;
+      emit('model-scale-changed', { modelId, scale: newScale });
     };
     
     // Select/deselect object
@@ -507,6 +698,8 @@ export default {
             originalMaterials.set(child, child.material);
           }
           child.material = highlightMaterial;
+          // Make object appear draggable
+          child.userData.draggable = true;
         }
       });
     };
@@ -516,6 +709,7 @@ export default {
       object.traverse(child => {
         if (child.isMesh && originalMaterials.has(child)) {
           child.material = originalMaterials.get(child);
+          child.userData.draggable = false;
         }
       });
     };
@@ -526,6 +720,8 @@ export default {
       
       if (!editMode.value) {
         selectObject(null);
+        isDragging = false;
+        renderer.domElement.style.cursor = 'default';
       }
       
       // Enable/disable orbit controls when in edit mode
@@ -915,6 +1111,10 @@ export default {
       // Remove event listeners
       if (renderer && renderer.domElement) {
         renderer.domElement.removeEventListener('click', onMouseClick);
+        renderer.domElement.removeEventListener('mousedown', onMouseDown);
+        renderer.domElement.removeEventListener('mousemove', onMouseMove);
+        renderer.domElement.removeEventListener('mouseup', onMouseUp);
+        renderer.domElement.removeEventListener('wheel', onMouseWheel);
       }
       
       // Dispose of all loaded models
@@ -1113,6 +1313,35 @@ export default {
 
 .control-button.active {
   background-color: #ff6b00;
+}
+
+.mouse-controls-info {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  background-color: rgba(0, 0, 0, 0.8);
+  color: white;
+  padding: 10px;
+  border-radius: 6px;
+  font-size: 12px;
+  max-width: 200px;
+}
+
+.controls-help h5 {
+  margin: 0 0 8px 0;
+  color: #ff6b00;
+  font-size: 14px;
+}
+
+.controls-help ul {
+  margin: 0;
+  padding-left: 15px;
+  list-style-type: disc;
+}
+
+.controls-help li {
+  margin-bottom: 4px;
+  line-height: 1.3;
 }
 
 .edit-sidebar {
@@ -1344,5 +1573,19 @@ export default {
   border: 1px solid #ddd;
   border-radius: 3px;
   padding: 2px 4px;
+}
+
+.control-hint {
+  margin-bottom: 8px;
+  font-size: 10px;
+  color: #666;
+  font-style: italic;
+}
+
+.control-hint span {
+  background-color: #f0f8ff;
+  padding: 2px 6px;
+  border-radius: 3px;
+  border: 1px solid #e0e0e0;
 }
 </style>
