@@ -112,10 +112,10 @@ export default {
 
 <style scoped>
 .scene-view {
-  padding: 20px;
+  padding: 10px;
   display: flex;
   flex-direction: column;
-  gap: 20px;
+  gap: 10px;
   height: 100vh;
 }
 
@@ -123,7 +123,7 @@ export default {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 20px;
+  margin-bottom: 10px;
 }
 
 .back-button {
@@ -147,11 +147,12 @@ h1 {
 
 .scene-container {
   width: 100%;
-  height: 75vh;
+  height: 70vh;
   border: 1px solid #ddd;
   border-radius: 8px;
   overflow: hidden;
   display: flex;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
 }
 
 .viewer-and-controls {

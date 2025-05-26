@@ -41,9 +41,9 @@ body, html {
   display: flex;
   flex-direction: column;
   width: 100%;
-  max-width: 1200px;
+  max-width: 1400px;
   margin: 0 auto;
-  padding: 0 20px;
+  padding: 0 15px;
   box-sizing: border-box;
   position: relative; /* Ensure proper stacking context */
   z-index: 1; /* Lower than header */

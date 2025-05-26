@@ -131,15 +131,16 @@ export default {
 
 <style scoped>
 .model-selector {
-  margin-bottom: 2rem;
-}
-
-h2 {
   margin-bottom: 1rem;
 }
 
+h2 {
+  margin-bottom: 0.5rem;
+  font-size: 1.3rem;
+}
+
 .loading, .error {
-  padding: 1rem;
+  padding: 0.5rem;
   text-align: center;
   background-color: #f5f5f5;
   border-radius: 4px;
@@ -152,26 +153,33 @@ h2 {
 
 .model-selection-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-  gap: 1rem;
-  margin-bottom: 1.5rem;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+  max-height: 300px;
+  overflow-y: auto;
+  padding: 0.5rem;
+  border: 1px solid #e0e0e0;
+  border-radius: 6px;
+  background-color: #fafafa;
 }
 
 .model-card {
-  border: 2px solid #e0e0e0;
-  border-radius: 6px;
-  padding: 1rem;
+  border: 1px solid #e0e0e0;
+  border-radius: 4px;
+  padding: 0.5rem;
   cursor: pointer;
   transition: all 0.2s ease;
   display: flex;
   flex-direction: column;
   justify-content: space-between;
-  height: 100%;
+  height: 120px;
+  font-size: 0.85rem;
 }
 
 .model-card:hover {
   border-color: #2196f3;
-  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
 }
 
 .model-selected {
@@ -182,45 +190,52 @@ h2 {
 .model-card-header {
   display: flex;
   justify-content: space-between;
-  align-items: center;
-  margin-bottom: 0.5rem;
+  align-items: flex-start;
+  margin-bottom: 0.3rem;
 }
 
 .model-card h3 {
   margin: 0;
-  font-size: 1.2rem;
+  font-size: 0.9rem;
   color: #333;
+  line-height: 1.2;
 }
 
 .model-format {
-  font-size: 0.8rem;
-  padding: 0.2rem 0.5rem;
+  font-size: 0.7rem;
+  padding: 0.1rem 0.3rem;
   background-color: #e0e0e0;
-  border-radius: 4px;
+  border-radius: 3px;
   color: #666;
 }
 
 .model-card-body {
   flex-grow: 1;
-  margin-bottom: 1rem;
+  margin-bottom: 0.5rem;
 }
 
 .model-card-body p {
   color: #666;
-  font-size: 0.9rem;
+  font-size: 0.75rem;
   margin: 0;
+  line-height: 1.3;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
 }
 
 .select-button {
   width: 100%;
-  padding: 0.5rem;
+  padding: 0.3rem;
   border: none;
-  border-radius: 4px;
+  border-radius: 3px;
   background-color: #2196f3;
   color: white;
   font-weight: bold;
   cursor: pointer;
   transition: background-color 0.2s;
+  font-size: 0.75rem;
 }
 
 .select-button:hover {
@@ -239,13 +254,13 @@ h2 {
   background-color: #e3f2fd;
   border: 1px solid #2196f3;
   border-radius: 6px;
-  padding: 12px;
-  margin-bottom: 15px;
+  padding: 8px;
+  margin-bottom: 10px;
 }
 
 .edit-mode-info p {
   margin: 0;
   color: #1976d2;
-  font-size: 14px;
+  font-size: 13px;
 }
 </style>

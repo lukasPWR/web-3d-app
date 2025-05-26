@@ -1060,7 +1060,8 @@ export default {
   position: relative;
   flex: 1;
   height: 100%;
-  min-width: 600px;
+  min-width: 700px;
+  min-height: 500px;
   border-right: 1px solid #ddd;
   overflow: hidden;
   box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
@@ -1069,7 +1070,8 @@ export default {
 #modelViewer {
   width: 100%;
   height: 100%;
-  min-width: 800px; /* Ensure minimum width */
+  min-width: 900px;
+  min-height: 500px;
 }
 
 .loading-overlay {
@@ -1114,11 +1116,12 @@ export default {
 }
 
 .edit-sidebar {
-  width: 300px;
+  width: 320px;
   height: 100%;
   background-color: #f8f9fa;
   border-left: 1px solid #ddd;
   overflow-y: auto;
+  flex-shrink: 0;
 }
 
 .edit-controls {

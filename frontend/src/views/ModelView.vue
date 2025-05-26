@@ -130,8 +130,8 @@ export default {
 }
 
 .model-container {
-  width: 100%;  /* Take full width */
-  max-width: 1400px; /* Increased from previous values */
+  width: 100%;
+  max-width: 1600px;
   margin: 0 auto;
   display: flex;
   flex-direction: column;
@@ -140,14 +140,14 @@ export default {
 
 .model-viewer-wrapper {
   width: 100%;
-  min-height: 600px;
+  min-height: 700px;
 }
 
 /* Override the deep selector syntax for Vue 3 */
 :deep(.model-viewer-container) {
   width: 100% !important;
-  height: 70vh !important;
-  min-height: 600px !important;
+  height: 80vh !important;
+  min-height: 700px !important;
 }
 
 .model-container h1, 
