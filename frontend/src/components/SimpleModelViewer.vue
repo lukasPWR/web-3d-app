@@ -12,6 +12,13 @@
         <button @click="toggleEditMode" class="control-button" :class="{ 'active': editMode }">
           {{ editMode ? 'Exit Edit' : 'Edit Mode' }}
         </button>
+        <!-- NEW: Vertex visualization toggle -->
+        <button @click="toggleVertexVisualization" class="control-button" :class="{ 'active': showVertices }">
+          {{ showVertices ? 'Hide' : 'Show' }} Vertices
+        </button>
+        <button @click="toggleWireframe" class="control-button" :class="{ 'active': showWireframe }">
+          {{ showWireframe ? 'Hide' : 'Show' }} Wireframe
+        </button>
       </div>
       
       <!-- Mouse Controls Info -->
@@ -24,6 +31,48 @@
             <li><strong>Ctrl + Drag:</strong> Move along Z-axis</li>
             <li><strong>Scroll:</strong> Scale object</li>
           </ul>
+        </div>
+      </div>
+
+      <!-- Vertex Visualization Controls -->
+      <div v-if="showVertices" class="vertex-controls">
+        <div class="vertex-settings">
+          <h5>Vertex Visualization</h5>
+          <div class="control-row">
+            <label>Size:</label>
+            <input 
+              type="range" 
+              min="0.01" 
+              max="0.5" 
+              step="0.01"
+              v-model="vertexSettings.size"
+              @input="updateVertexVisualization"
+              class="vertex-slider"
+            />
+            <span>{{ vertexSettings.size }}</span>
+          </div>
+          <div class="control-row">
+            <label>Color:</label>
+            <input 
+              type="color" 
+              v-model="vertexSettings.color"
+              @input="updateVertexVisualization"
+              class="vertex-color-picker"
+            />
+          </div>
+          <div class="control-row">
+            <label>Opacity:</label>
+            <input 
+              type="range" 
+              min="0.1" 
+              max="1" 
+              step="0.1"
+              v-model="vertexSettings.opacity"
+              @input="updateVertexVisualization"
+              class="vertex-slider"
+            />
+            <span>{{ vertexSettings.opacity }}</span>
+          </div>
         </div>
       </div>
     </div>
@@ -238,18 +287,25 @@
         </div>
       </div>
     </div>
+    
+    <!-- Model Analyzer - NEW -->
+    <ModelAnalyzer v-if="!editMode" />
   </div>
 </template>
 
 <script>
-import { ref, reactive, onMounted, onBeforeUnmount, watch, computed } from 'vue';
+import { ref, reactive, onMounted, onBeforeUnmount, watch, computed, provide } from 'vue';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { OBJLoader } from 'three/examples/jsm/loaders/OBJLoader.js';
 import api from '../services/api.js';
+import ModelAnalyzer from './ModelAnalyzer.vue';
 
 export default {
   name: 'SimpleModelViewer',
+  components: {
+    ModelAnalyzer
+  },
   props: {
     // Array of model objects with { id, modelPath, color, position, scale, rotation }
     models: {
@@ -333,6 +389,19 @@ export default {
     
     // Map to track loaded models - key: modelId, value: THREE.Object3D
     const loadedModels = reactive(new Map());
+    
+    // NEW: Vertex visualization state
+    const showVertices = ref(false);
+    const showWireframe = ref(false);
+    const vertexSettings = reactive({
+      size: 0.05,
+      color: '#ff0000',
+      opacity: 0.8
+    });
+    
+    // Store vertex point clouds for each model
+    const vertexPointClouds = new Map();
+    const wireframeObjects = new Map();
     
     // Initialize Three.js scene
     const initScene = () => {
@@ -879,9 +948,8 @@ export default {
       resetObjectScale();
     };
     
-    // Load a model
+    // Load a model (unified function)
     const loadModel = async (modelData) => {
-      // Get the model path - supporting both modelPath and modelUrl properties
       const modelPath = modelData.modelPath || modelData.modelUrl;
       
       if (!modelData || !modelData.id || (!modelData.modelPath && !modelData.modelUrl)) {
@@ -893,13 +961,25 @@ export default {
       if (loadedModels.has(modelData.id)) {
         const existingModel = loadedModels.get(modelData.id);
         scene.remove(existingModel);
+        
+        // Remove vertex visualization
+        if (vertexPointClouds.has(modelData.id)) {
+          scene.remove(vertexPointClouds.get(modelData.id));
+          vertexPointClouds.delete(modelData.id);
+        }
+        
+        // Remove wireframe visualization
+        if (wireframeObjects.has(modelData.id)) {
+          scene.remove(wireframeObjects.get(modelData.id));
+          wireframeObjects.delete(modelData.id);
+        }
+        
         loadedModels.delete(modelData.id);
       }
       
       try {
         const loader = new OBJLoader();
         
-        // Load the model with enhanced error handling
         const object = await new Promise((resolve, reject) => {
           loader.load(
             modelPath,
@@ -970,6 +1050,16 @@ export default {
         
         scene.add(object);
         loadedModels.set(modelData.id, object);
+        
+        // Add vertex visualization if enabled
+        if (showVertices.value) {
+          createModelVertexVisualization(object, modelData.id);
+        }
+        
+        // Add wireframe if enabled
+        if (showWireframe.value) {
+          createModelWireframeVisualization(object, modelData.id);
+        }
         
         return object;
       } catch (err) {
@@ -1283,6 +1373,11 @@ export default {
       await manageModels();
     }, { deep: true });
     
+    // Provide loaded models to child components
+    provide('threeScene', {
+      loadedModels
+    });
+    
     // Update material color
     const updateMaterialColor = (colorHex) => {
       if (!selectedObject.value) return;
@@ -1430,6 +1525,174 @@ export default {
       emit('model-scale-changed', { modelId, scale: newScale });
     };
 
+    // NEW: Toggle vertex visualization
+    const toggleVertexVisualization = () => {
+      showVertices.value = !showVertices.value;
+      
+      if (showVertices.value) {
+        createVertexVisualization();
+      } else {
+        removeVertexVisualization();
+      }
+    };
+    
+    // NEW: Toggle wireframe
+    const toggleWireframe = () => {
+      showWireframe.value = !showWireframe.value;
+      
+      if (showWireframe.value) {
+        createWireframeVisualization();
+      } else {
+        removeWireframeVisualization();
+      }
+    };
+    
+    // NEW: Create vertex visualization for all loaded models
+    const createVertexVisualization = () => {
+      loadedModels.forEach((model, modelId) => {
+        createModelVertexVisualization(model, modelId);
+      });
+    };
+    
+    // NEW: Create vertex visualization for a specific model
+    const createModelVertexVisualization = (model, modelId) => {
+      // Remove existing vertex visualization for this model
+      if (vertexPointClouds.has(modelId)) {
+        scene.remove(vertexPointClouds.get(modelId));
+        vertexPointClouds.delete(modelId);
+      }
+      
+      const allVertices = [];
+      
+      // Collect all vertices from all meshes in the model
+      model.traverse((child) => {
+        if (child.isMesh && child.geometry) {
+          const geometry = child.geometry;
+          const positions = geometry.attributes.position;
+          
+          if (positions) {
+            // Transform vertices to world coordinates
+            child.updateMatrixWorld(true);
+            
+            for (let i = 0; i < positions.count; i++) {
+              const vertex = new THREE.Vector3(
+                positions.getX(i),
+                positions.getY(i),
+                positions.getZ(i)
+              );
+              
+              // Transform to world coordinates
+              vertex.applyMatrix4(child.matrixWorld);
+              allVertices.push(vertex.x, vertex.y, vertex.z);
+            }
+          }
+        }
+      });
+      
+      if (allVertices.length > 0) {
+        // Create point cloud geometry
+        const pointGeometry = new THREE.BufferGeometry();
+        pointGeometry.setAttribute('position', new THREE.Float32BufferAttribute(allVertices, 3));
+        
+        // Create point material
+        const pointMaterial = new THREE.PointsMaterial({
+          color: new THREE.Color(vertexSettings.color),
+          size: vertexSettings.size,
+          transparent: true,
+          opacity: vertexSettings.opacity,
+          sizeAttenuation: true
+        });
+        
+        // Create point cloud
+        const pointCloud = new THREE.Points(pointGeometry, pointMaterial);
+        pointCloud.userData.modelId = modelId;
+        pointCloud.userData.isVertexVisualization = true;
+        
+        scene.add(pointCloud);
+        vertexPointClouds.set(modelId, pointCloud);
+      }
+    };
+    
+    // NEW: Create wireframe visualization
+    const createWireframeVisualization = () => {
+      loadedModels.forEach((model, modelId) => {
+        createModelWireframeVisualization(model, modelId);
+      });
+    };
+    
+    // NEW: Create wireframe for a specific model
+    const createModelWireframeVisualization = (model, modelId) => {
+      // Remove existing wireframe for this model
+      if (wireframeObjects.has(modelId)) {
+        scene.remove(wireframeObjects.get(modelId));
+        wireframeObjects.delete(modelId);
+      }
+      
+      const wireframeGroup = new THREE.Group();
+      
+      model.traverse((child) => {
+        if (child.isMesh && child.geometry) {
+          // Create wireframe geometry
+          const wireframeGeometry = new THREE.WireframeGeometry(child.geometry);
+          
+          // Create wireframe material
+          const wireframeMaterial = new THREE.LineBasicMaterial({
+            color: 0x00ff00,
+            transparent: true,
+            opacity: 0.5
+          });
+          
+          // Create wireframe object
+          const wireframe = new THREE.LineSegments(wireframeGeometry, wireframeMaterial);
+          
+          // Apply the same transform as the original mesh
+          wireframe.matrix.copy(child.matrixWorld);
+          wireframe.matrixAutoUpdate = false;
+          
+          wireframeGroup.add(wireframe);
+        }
+      });
+      
+      if (wireframeGroup.children.length > 0) {
+        wireframeGroup.userData.modelId = modelId;
+        wireframeGroup.userData.isWireframeVisualization = true;
+        
+        scene.add(wireframeGroup);
+        wireframeObjects.set(modelId, wireframeGroup);
+      }
+    };
+    
+    // NEW: Remove vertex visualization
+    const removeVertexVisualization = () => {
+      vertexPointClouds.forEach((pointCloud) => {
+        scene.remove(pointCloud);
+        pointCloud.geometry.dispose();
+        pointCloud.material.dispose();
+      });
+      vertexPointClouds.clear();
+    };
+    
+    // NEW: Remove wireframe visualization
+    const removeWireframeVisualization = () => {
+      wireframeObjects.forEach((wireframeGroup) => {
+        scene.remove(wireframeGroup);
+        wireframeGroup.traverse((child) => {
+          if (child.geometry) child.geometry.dispose();
+          if (child.material) child.material.dispose();
+        });
+      });
+      wireframeObjects.clear();
+    };
+    
+    // NEW: Update vertex visualization settings
+    const updateVertexVisualization = () => {
+      vertexPointClouds.forEach((pointCloud) => {
+        pointCloud.material.color.setHex(vertexSettings.color.replace('#', '0x'));
+        pointCloud.material.size = vertexSettings.size;
+        pointCloud.material.opacity = vertexSettings.opacity;
+      });
+    };
+
     return {
       container,
       isLoading,
@@ -1456,7 +1719,13 @@ export default {
       applySelectedTexture,
       getSelectedTextureUrl,
       getSelectedTextureName,
-      onTexturePreviewError
+      onTexturePreviewError,
+      showVertices,
+      showWireframe,
+      vertexSettings,
+      toggleVertexVisualization,
+      toggleWireframe,
+      updateVertexVisualization
     };
   }
 };
@@ -1831,5 +2100,55 @@ export default {
   border: 1px solid #ddd;
   border-radius: 4px;
   background-color: #f9f9f9;
+}
+
+/* NEW: Vertex visualization controls */
+.vertex-controls {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  background-color: rgba(0, 0, 0, 0.8);
+  color: white;
+  padding: 10px;
+  border-radius: 6px;
+  font-size: 12px;
+  max-width: 250px;
+}
+
+.vertex-settings h5 {
+  margin: 0 0 8px 0;
+  color: #ff6b00;
+  font-size: 14px;
+}
+
+.control-row {
+  display: flex;
+  align-items: center;
+  margin-bottom: 6px;
+  gap: 8px;
+}
+
+.control-row label {
+  min-width: 60px;
+  font-size: 11px;
+}
+
+.vertex-slider {
+  flex: 1;
+  min-width: 80px;
+}
+
+.vertex-color-picker {
+  width: 30px;
+  height: 20px;
+  border: none;
+  border-radius: 3px;
+  cursor: pointer;
+}
+
+.control-row span {
+  min-width: 30px;
+  font-size: 10px;
+  text-align: right;
 }
 </style>
