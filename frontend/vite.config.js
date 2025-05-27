@@ -13,12 +13,17 @@ export default defineConfig({
   server: {
     proxy: {
       '/api': {
-        target: 'http://localhost:5000', // Changed port to 5000 to match your Flask app
+        target: 'http://localhost:5000',
         changeOrigin: true,
         secure: false
       },
       '/models': {
-        target: 'http://localhost:5000', // Added proxy for /models path
+        target: 'http://localhost:5000',
+        changeOrigin: true,
+        secure: false
+      },
+      '/textures': {
+        target: 'http://localhost:5000',
         changeOrigin: true,
         secure: false
       }

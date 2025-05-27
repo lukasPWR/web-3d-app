@@ -175,6 +175,43 @@
               />
               <span class="value-display">{{ selectedObjectMaterial.emissiveIntensity.toFixed(1) }}</span>
             </div>
+            
+            <!-- NEW: Texture Selection -->
+            <div class="axis-control">
+              <label>Texture:</label>
+              <select 
+                v-model="selectedObjectMaterial.textureId" 
+                @change="applySelectedTexture($event.target.value)"
+                class="texture-selector"
+              >
+                <option value="">No Texture</option>
+                <option v-for="texture in availableTextures" :key="texture.id" :value="texture.id">
+                  {{ texture.name }}
+                </option>
+              </select>
+            </div>
+
+            <!-- Texture Upload -->
+            <div class="axis-control">
+              <label>Upload:</label>
+              <input 
+                type="file" 
+                ref="textureFileInput"
+                @change="handleTextureUpload"
+                accept=".jpg,.jpeg,.png,.bmp,.tga,.tiff"
+                class="texture-upload-input"
+              />
+            </div>
+            
+            <!-- Show texture preview if texture is selected -->
+            <div v-if="selectedObjectMaterial.textureId" class="texture-preview">
+              <img 
+                :src="getSelectedTextureUrl()" 
+                :alt="getSelectedTextureName()"
+                class="texture-preview-image"
+                @error="onTexturePreviewError"
+              />
+            </div>
           </div>
           
           <div class="step-control">
@@ -209,6 +246,7 @@ import { ref, reactive, onMounted, onBeforeUnmount, watch, computed } from 'vue'
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { OBJLoader } from 'three/examples/jsm/loaders/OBJLoader.js';
+import api from '../services/api.js';
 
 export default {
   name: 'SimpleModelViewer',
@@ -245,8 +283,18 @@ export default {
       roughness: 0.7,
       metalness: 0.1,
       emissive: '#000000',
-      emissiveIntensity: 0.0
+      emissiveIntensity: 0.0,
+      textureId: '',
+      textureScale: 1
     });
+    
+    // Available textures from backend
+    const availableTextures = ref([]);
+    const textureFileInput = ref(null);
+    
+    // Texture cache
+    const textureLoader = new THREE.TextureLoader();
+    const loadedTextures = new Map();
     
     // Create a computed prop that handles both the new models array and the legacy modelPath/modelFormat props
     const modelsToLoad = computed(() => {
@@ -602,6 +650,133 @@ export default {
       }
     };
     
+    // Load textures from backend
+    const loadTextures = async () => {
+      try {
+        const response = await api.getTextures();
+        availableTextures.value = response.data;
+      } catch (error) {
+        console.error('Failed to load textures:', error);
+      }
+    };
+
+    // Handle texture file upload
+    const handleTextureUpload = async (event) => {
+      const file = event.target.files[0];
+      if (!file) return;
+
+      const formData = new FormData();
+      formData.append('file', file);
+      formData.append('name', file.name);
+      formData.append('description', `Uploaded texture: ${file.name}`);
+      formData.append('type', 'diffuse');
+      formData.append('category', 'uploaded');
+
+      try {
+        const response = await api.uploadTexture(formData);
+        const newTexture = response.data;
+        
+        // Add to available textures
+        availableTextures.value.push(newTexture);
+        
+        // Automatically apply the uploaded texture
+        selectedObjectMaterial.value.textureId = newTexture.id;
+        await applySelectedTexture(newTexture.id);
+        
+        // Clear file input
+        if (textureFileInput.value) {
+          textureFileInput.value.value = '';
+        }
+        
+        console.log('Texture uploaded successfully:', newTexture);
+      } catch (error) {
+        console.error('Failed to upload texture:', error);
+        alert('Failed to upload texture. Please try again.');
+      }
+    };
+
+    // Get selected texture URL
+    const getSelectedTextureUrl = () => {
+      if (!selectedObjectMaterial.value.textureId) return '';
+      
+      const texture = availableTextures.value.find(t => t.id === selectedObjectMaterial.value.textureId);
+      return texture ? texture.textureUrl : '';
+    };
+
+    // Get selected texture name
+    const getSelectedTextureName = () => {
+      if (!selectedObjectMaterial.value.textureId) return '';
+      
+      const texture = availableTextures.value.find(t => t.id === selectedObjectMaterial.value.textureId);
+      return texture ? texture.name : '';
+    };
+
+    // Load texture with caching
+    const loadTexture = async (textureUrl) => {
+      if (loadedTextures.has(textureUrl)) {
+        return loadedTextures.get(textureUrl);
+      }
+      
+      try {
+        const texture = await new Promise((resolve, reject) => {
+          textureLoader.load(
+            textureUrl,
+            (tex) => {
+              tex.wrapS = THREE.RepeatWrapping;
+              tex.wrapT = THREE.RepeatWrapping;
+              tex.flipY = false;
+              resolve(tex);
+            },
+            undefined,
+            reject
+          );
+        });
+        
+        loadedTextures.set(textureUrl, texture);
+        return texture;
+      } catch (error) {
+        console.warn(`Failed to load texture: ${textureUrl}`, error);
+        return null;
+      }
+    };
+
+    // Apply selected texture to object
+    const applySelectedTexture = async (textureId) => {
+      if (!selectedObject.value) return;
+      
+      selectedObjectMaterial.value.textureId = textureId;
+      
+      if (!textureId) {
+        // Remove texture - use basic material
+        await updateObjectMaterial();
+        emitMaterialChange();
+        return;
+      }
+      
+      const texture = availableTextures.value.find(t => t.id === textureId);
+      if (!texture) return;
+      
+      try {
+        // Load the texture
+        const loadedTexture = await loadTexture(texture.textureUrl);
+        
+        if (loadedTexture) {
+          // Apply texture to material
+          const textures = { map: loadedTexture };
+          await updateObjectMaterial(textures);
+          emitMaterialChange();
+        }
+      } catch (error) {
+        console.error('Error applying texture:', error);
+      }
+    };
+
+    // Handle texture preview error
+    const onTexturePreviewError = (event) => {
+      console.warn('Texture preview failed to load:', event.target.src);
+      event.target.style.display = 'none';
+    };
+
     // Update material display values
     const updateMaterialDisplay = () => {
       if (!selectedObject.value) return;
@@ -620,164 +795,47 @@ export default {
           roughness: meshMaterial.roughness || 0.7,
           metalness: meshMaterial.metalness || 0.1,
           emissive: '#' + meshMaterial.emissive.getHexString(),
-          emissiveIntensity: meshMaterial.emissiveIntensity || 0.0
+          emissiveIntensity: meshMaterial.emissiveIntensity || 0.0,
+          textureId: selectedObjectMaterial.value.textureId || '',
+          textureScale: selectedObjectMaterial.value.textureScale || 1
         };
       }
     };
     
-    // Update material color
-    const updateMaterialColor = (colorHex) => {
+    // Update object material with optional textures
+    const updateObjectMaterial = async (textures = {}) => {
       if (!selectedObject.value) return;
-      
-      selectedObjectMaterial.value.color = colorHex;
       
       selectedObject.value.traverse(child => {
         if (child.isMesh) {
-          const material = originalMaterials.get(child);
-          if (material) {
-            material.color.setHex(colorHex.replace('#', '0x'));
+          let material = originalMaterials.get(child);
+          
+          if (!material || Object.keys(textures).length > 0) {
+            // Create new material with textures
+            material = new THREE.MeshStandardMaterial({
+              color: new THREE.Color(selectedObjectMaterial.value.color),
+              roughness: selectedObjectMaterial.value.roughness,
+              metalness: selectedObjectMaterial.value.metalness,
+              emissive: new THREE.Color(selectedObjectMaterial.value.emissive),
+              emissiveIntensity: selectedObjectMaterial.value.emissiveIntensity,
+              ...textures
+            });
+            
+            // Set texture scale
+            const scale = selectedObjectMaterial.value.textureScale || 1;
+            Object.values(textures).forEach(texture => {
+              if (texture) {
+                texture.repeat.set(scale, scale);
+              }
+            });
+            
+            originalMaterials.set(child, material);
+            child.material = material;
           }
         }
       });
-      
-      emitMaterialChange();
     };
-    
-    // Update material emissive color
-    const updateMaterialEmissive = (colorHex) => {
-      if (!selectedObject.value) return;
-      
-      selectedObjectMaterial.value.emissive = colorHex;
-      
-      selectedObject.value.traverse(child => {
-        if (child.isMesh) {
-          const material = originalMaterials.get(child);
-          if (material) {
-            material.emissive.setHex(colorHex.replace('#', '0x'));
-          }
-        }
-      });
-      
-      emitMaterialChange();
-    };
-    
-    // Update material property (roughness, metalness, emissiveIntensity)
-    const updateMaterialProperty = (property, value) => {
-      if (!selectedObject.value) return;
-      
-      selectedObjectMaterial.value[property] = value;
-      
-      selectedObject.value.traverse(child => {
-        if (child.isMesh) {
-          const material = originalMaterials.get(child);
-          if (material && material[property] !== undefined) {
-            material[property] = value;
-          }
-        }
-      });
-      
-      emitMaterialChange();
-    };
-    
-    // Emit material change event
-    const emitMaterialChange = () => {
-      if (!selectedObject.value) return;
-      
-      const modelId = selectedObject.value.userData.modelId;
-      emit('model-material-changed', { 
-        modelId, 
-        material: { ...selectedObjectMaterial.value } 
-      });
-    };
-    
-    // Highlight selected object
-    const highlightObject = (object) => {
-      object.traverse(child => {
-        if (child.isMesh) {
-          if (!originalMaterials.has(child)) {
-            originalMaterials.set(child, child.material);
-          }
-          child.material = highlightMaterial;
-          // Make object appear draggable
-          child.userData.draggable = true;
-        }
-      });
-    };
-    
-    // Restore object's original material
-    const restoreObjectMaterial = (object) => {
-      object.traverse(child => {
-        if (child.isMesh && originalMaterials.has(child)) {
-          child.material = originalMaterials.get(child);
-          child.userData.draggable = false;
-        }
-      });
-    };
-    
-    // Toggle edit mode
-    const toggleEditMode = () => {
-      editMode.value = !editMode.value;
-      
-      if (!editMode.value) {
-        selectObject(null);
-        isDragging = false;
-        renderer.domElement.style.cursor = 'default';
-      }
-      
-      // Enable/disable orbit controls when in edit mode
-      if (controls) {
-        controls.enabled = !editMode.value;
-      }
-    };
-    
-    // Move selected object
-    const moveObject = (axis, delta) => {
-      if (!selectedObject.value) return;
-      
-      selectedObject.value.position[axis] += delta;
-      
-      // Emit position change event
-      const modelId = selectedObject.value.userData.modelId;
-      const newPosition = {
-        x: selectedObject.value.position.x,
-        y: selectedObject.value.position.y,
-        z: selectedObject.value.position.z
-      };
-      
-      emit('model-position-changed', { modelId, position: newPosition });
-    };
-    
-    // Rotate selected object
-    const rotateObject = (axis, delta) => {
-      if (!selectedObject.value) return;
-      
-      // Convert delta from degrees to radians
-      const radians = THREE.MathUtils.degToRad(delta);
-      selectedObject.value.rotation[axis] += radians;
-      
-      // Emit rotation change event (convert back to degrees for consistency)
-      const modelId = selectedObject.value.userData.modelId;
-      const newRotation = {
-        x: THREE.MathUtils.radToDeg(selectedObject.value.rotation.x),
-        y: THREE.MathUtils.radToDeg(selectedObject.value.rotation.y),
-        z: THREE.MathUtils.radToDeg(selectedObject.value.rotation.z)
-      };
-      
-      emit('model-rotation-changed', { modelId, rotation: newRotation });
-    };
-    
-    // Scale selected object
-    const scaleObject = (delta) => {
-      if (!selectedObject.value) return;
-      
-      const newScale = Math.max(0.1, (selectedObject.value.scale.x || 1) + delta);
-      selectedObject.value.scale.set(newScale, newScale, newScale);
-      
-      // Emit scale change event
-      const modelId = selectedObject.value.userData.modelId;
-      emit('model-scale-changed', { modelId, scale: newScale });
-    };
-    
+
     // Reset selected object position
     const resetObjectPosition = () => {
       if (!selectedObject.value) return;
@@ -1205,6 +1263,7 @@ export default {
         setTimeout(() => {
           initScene();
           loadModels();
+          loadTextures(); // Load available textures
         }, 0);
       }
       
@@ -1224,6 +1283,153 @@ export default {
       await manageModels();
     }, { deep: true });
     
+    // Update material color
+    const updateMaterialColor = (colorHex) => {
+      if (!selectedObject.value) return;
+      
+      selectedObjectMaterial.value.color = colorHex;
+      
+      selectedObject.value.traverse(child => {
+        if (child.isMesh) {
+          const material = originalMaterials.get(child);
+          if (material) {
+            material.color.setHex(colorHex.replace('#', '0x'));
+          }
+        }
+      });
+      
+      emitMaterialChange();
+    };
+    
+    // Update material emissive color
+    const updateMaterialEmissive = (colorHex) => {
+      if (!selectedObject.value) return;
+      
+      selectedObjectMaterial.value.emissive = colorHex;
+      
+      selectedObject.value.traverse(child => {
+        if (child.isMesh) {
+          const material = originalMaterials.get(child);
+          if (material) {
+            material.emissive.setHex(colorHex.replace('#', '0x'));
+          }
+        }
+      });
+      
+      emitMaterialChange();
+    };
+    
+    // Update material property (roughness, metalness, emissiveIntensity)
+    const updateMaterialProperty = (property, value) => {
+      if (!selectedObject.value) return;
+      
+      selectedObjectMaterial.value[property] = value;
+      
+      selectedObject.value.traverse(child => {
+        if (child.isMesh) {
+          const material = originalMaterials.get(child);
+          if (material && material[property] !== undefined) {
+            material[property] = value;
+          }
+        }
+      });
+      
+      emitMaterialChange();
+    };
+    
+    // Emit material change event
+    const emitMaterialChange = () => {
+      if (!selectedObject.value) return;
+      
+      const modelId = selectedObject.value.userData.modelId;
+      emit('model-material-changed', { 
+        modelId, 
+        material: { ...selectedObjectMaterial.value } 
+      });
+    };
+    
+    // Highlight selected object
+    const highlightObject = (object) => {
+      object.traverse(child => {
+        if (child.isMesh) {
+          if (!originalMaterials.has(child)) {
+            originalMaterials.set(child, child.material);
+          }
+          child.material = highlightMaterial;
+          child.userData.draggable = true;
+        }
+      });
+    };
+    
+    // Restore object's original material
+    const restoreObjectMaterial = (object) => {
+      object.traverse(child => {
+        if (child.isMesh && originalMaterials.has(child)) {
+          child.material = originalMaterials.get(child);
+          child.userData.draggable = false;
+        }
+      });
+    };
+    
+    // Toggle edit mode
+    const toggleEditMode = () => {
+      editMode.value = !editMode.value;
+      
+      if (!editMode.value) {
+        selectObject(null);
+        isDragging = false;
+        renderer.domElement.style.cursor = 'default';
+      }
+      
+      if (controls) {
+        controls.enabled = !editMode.value;
+      }
+    };
+    
+    // Move selected object
+    const moveObject = (axis, delta) => {
+      if (!selectedObject.value) return;
+      
+      selectedObject.value.position[axis] += delta;
+      
+      const modelId = selectedObject.value.userData.modelId;
+      const newPosition = {
+        x: selectedObject.value.position.x,
+        y: selectedObject.value.position.y,
+        z: selectedObject.value.position.z
+      };
+      
+      emit('model-position-changed', { modelId, position: newPosition });
+    };
+    
+    // Rotate selected object
+    const rotateObject = (axis, delta) => {
+      if (!selectedObject.value) return;
+      
+      const radians = THREE.MathUtils.degToRad(delta);
+      selectedObject.value.rotation[axis] += radians;
+      
+      const modelId = selectedObject.value.userData.modelId;
+      const newRotation = {
+        x: THREE.MathUtils.radToDeg(selectedObject.value.rotation.x),
+        y: THREE.MathUtils.radToDeg(selectedObject.value.rotation.y),
+        z: THREE.MathUtils.radToDeg(selectedObject.value.rotation.z)
+      };
+      
+      emit('model-rotation-changed', { modelId, rotation: newRotation });
+    };
+    
+    // Scale selected object
+    const scaleObject = (delta) => {
+      if (!selectedObject.value) return;
+      
+      const newScale = Math.max(0.1, (selectedObject.value.scale.x || 1) + delta);
+      selectedObject.value.scale.set(newScale, newScale, newScale);
+      
+      const modelId = selectedObject.value.userData.modelId;
+      emit('model-scale-changed', { modelId, scale: newScale });
+    };
+
     return {
       container,
       isLoading,
@@ -1232,6 +1438,8 @@ export default {
       selectedObject,
       moveStep,
       selectedObjectMaterial,
+      availableTextures,
+      textureFileInput,
       resetCamera,
       toggleGrid,
       toggleEditMode,
@@ -1243,7 +1451,12 @@ export default {
       scaleObject,
       updateMaterialColor,
       updateMaterialEmissive,
-      updateMaterialProperty
+      updateMaterialProperty,
+      handleTextureUpload,
+      applySelectedTexture,
+      getSelectedTextureUrl,
+      getSelectedTextureName,
+      onTexturePreviewError
     };
   }
 };
@@ -1587,5 +1800,36 @@ export default {
   padding: 2px 6px;
   border-radius: 3px;
   border: 1px solid #e0e0e0;
+}
+
+.texture-selector {
+  flex: 1;
+  padding: 4px 8px;
+  border: 1px solid #ddd;
+  border-radius: 3px;
+  font-size: 11px;
+  background-color: white;
+}
+
+.texture-upload-input {
+  padding: 2px;
+  border: 1px solid #ddd;
+  border-radius: 3px;
+  font-size: 10px;
+  flex: 1;
+}
+
+.texture-preview {
+  margin: 8px 0;
+  text-align: center;
+}
+
+.texture-preview-image {
+  width: 80px;
+  height: 80px;
+  object-fit: cover;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  background-color: #f9f9f9;
 }
 </style>

@@ -54,5 +54,25 @@ export default {
       return Promise.reject(new Error('Model ID is required'));
     }
     return apiClient.delete(`/api/models/${id}`);
+  },
+
+  // Texture related API calls
+  getTextures() {
+    return apiClient.get('/api/textures');
+  },
+  
+  uploadTexture(formData) {
+    return apiClient.post('/api/textures/upload', formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data'
+      }
+    });
+  },
+  
+  deleteTexture(id) {
+    if (!id) {
+      return Promise.reject(new Error('Texture ID is required'));
+    }
+    return apiClient.delete(`/api/textures/${id}`);
   }
 };

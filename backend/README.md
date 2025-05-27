@@ -30,7 +30,34 @@ Backend aplikacji do wyświetlania modeli 3D, napisany w języku Python z wykorz
 
 ## Dostępne endpointy API
 
+### Modele 3D
+
 - `GET /api/models` - pobiera listę wszystkich modeli
 - `GET /api/models/<id>` - pobiera szczegóły modelu o podanym ID
-- `POST /api/models` - dodaje nowy model
+- `POST /api/models/upload` - uploaduje nowy model 3D
+- `DELETE /api/models/<id>` - usuwa model o podanym ID
 - `GET /models/<filename>` - pobiera plik modelu 3D
+
+### Tekstury
+
+- `GET /api/textures` - pobiera listę wszystkich tekstur
+- `POST /api/textures/upload` - uploaduje nową teksturę
+- `DELETE /api/textures/<id>` - usuwa teksturę o podanym ID
+- `GET /textures/<filename>` - pobiera plik tekstury
+
+## Obsługiwane formaty
+
+### Modele 3D
+
+- OBJ
+- GLTF
+- GLB
+- FBX
+
+### Tekstury
+
+- JPG/JPEG
+- PNG
+- BMP
+- TGA
+- TIFF
