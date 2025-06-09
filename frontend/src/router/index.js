@@ -1,5 +1,6 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import HomeView from '../views/HomeView.vue'
+import CreateModelView from '../views/CreateModelView.vue'
 
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
@@ -22,6 +23,11 @@ const router = createRouter({
       name: 'scene',
       // Lazy-loaded component
       component: () => import('../views/SceneView.vue')
+    },
+    {
+      path: '/create',
+      name: 'create-model',
+      component: CreateModelView
     }
   ]
 })

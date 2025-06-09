@@ -74,5 +74,29 @@ export default {
       return Promise.reject(new Error('Texture ID is required'));
     }
     return apiClient.delete(`/api/textures/${id}`);
+  },
+
+  // Drawing related API calls
+  executeDrawingSession(sessionData) {
+    return apiClient.post('/api/draw/session', sessionData);
+  },
+  
+  drawLine(points, color = '#ffffff', thickness = 0.01, name = 'Line') {
+    return apiClient.post('/api/draw/line', {
+      points,
+      color,
+      thickness,
+      name
+    });
+  },
+  
+  drawPrimitive(primitiveType, location = [0, 0, 0], scale = [1, 1, 1], color = '#8080ff', name = null) {
+    return apiClient.post('/api/draw/primitive', {
+      primitive_type: primitiveType,
+      location,
+      scale,
+      color,
+      name: name || `${primitiveType.charAt(0).toUpperCase() + primitiveType.slice(1)}_Generated`
+    });
   }
 };

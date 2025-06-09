@@ -5,6 +5,11 @@
       <button @click="$router.push('/')" class="back-button">Return to Main Menu</button>
     </div>
     
+    <!-- NEW: Model Drawing Tools -->
+    <div class="drawing-tools-container">
+      <ModelDrawer @model-created="handleModelCreated" />
+    </div>
+    
     <div class="scene-container">
       <div class="viewer-and-controls">
         <SimpleModelViewer 
@@ -16,7 +21,7 @@
           v-if="selectedModels.length > 0"
         />
         <div v-else class="empty-scene">
-          <p>No models in scene. Select models from the list below to add.</p>
+          <p>No models in scene. Select models from the list below or use the drawing tools above to create models.</p>
         </div>
       </div>
     </div>
@@ -34,73 +39,75 @@
 import { ref, onMounted } from 'vue';
 import SimpleModelViewer from '@/components/SimpleModelViewer.vue';
 import ModelSelector from '@/components/ModelSelector.vue';
+import ModelDrawer from '@/components/ModelDrawer.vue';
 
 export default {
   name: 'SceneView',
   components: {
     SimpleModelViewer,
-    ModelSelector
+    ModelSelector,
+    ModelDrawer
   },
   setup() {
     const selectedModels = ref([]);
     
-    // Handle position changes from edit mode
-    const handleModelPositionChanged = ({ modelId, position }) => {
-      const modelIndex = selectedModels.value.findIndex(model => model.id === modelId);
-      if (modelIndex !== -1) {
-        // Use Vue's reactivity properly to avoid unnecessary re-renders
-        selectedModels.value[modelIndex] = {
-          ...selectedModels.value[modelIndex],
-          position: { ...position }
-        };
+    // NEW: Handle model creation from drawing tools
+    const handleModelCreated = (newModel) => {
+      // Calculate automatic position for the new model
+      const modelCount = selectedModels.value.length;
+      const spacing = 3;
+      const gridSize = Math.ceil(Math.sqrt(modelCount + 1));
+      
+      const row = Math.floor(modelCount / gridSize);
+      const col = modelCount % gridSize;
+      const gridOffset = (gridSize - 1) * spacing / 2;
+      
+      // Position the new model in the grid
+      const modelWithPosition = {
+        ...newModel,
+        position: [
+          col * spacing - gridOffset,
+          0,
+          row * spacing - gridOffset
+        ],
+        rotation: [0, 0, 0],
+        scale: [1, 1, 1]
+      };
+      
+      selectedModels.value.push(modelWithPosition);
+    };
+    
+    const handleModelPositionChanged = (modelId, newPosition) => {
+      const model = selectedModels.value.find(m => m.id === modelId);
+      if (model) {
+        model.position = newPosition;
       }
     };
     
-    // Handle rotation changes from edit mode
-    const handleModelRotationChanged = ({ modelId, rotation }) => {
-      const modelIndex = selectedModels.value.findIndex(model => model.id === modelId);
-      if (modelIndex !== -1) {
-        selectedModels.value[modelIndex] = {
-          ...selectedModels.value[modelIndex],
-          rotation: { ...rotation }
-        };
+    const handleModelRotationChanged = (modelId, newRotation) => {
+      const model = selectedModels.value.find(m => m.id === modelId);
+      if (model) {
+        model.rotation = newRotation;
       }
     };
     
-    // Handle scale changes from edit mode
-    const handleModelScaleChanged = ({ modelId, scale }) => {
-      const modelIndex = selectedModels.value.findIndex(model => model.id === modelId);
-      if (modelIndex !== -1) {
-        selectedModels.value[modelIndex] = {
-          ...selectedModels.value[modelIndex],
-          scale
-        };
+    const handleModelScaleChanged = (modelId, newScale) => {
+      const model = selectedModels.value.find(m => m.id === modelId);
+      if (model) {
+        model.scale = newScale;
       }
     };
     
-    // Handle material changes from edit mode
-    const handleModelMaterialChanged = ({ modelId, material }) => {
-      const modelIndex = selectedModels.value.findIndex(model => model.id === modelId);
-      if (modelIndex !== -1) {
-        const updatedModel = { ...selectedModels.value[modelIndex] };
-        
-        // Update the material object
-        updatedModel.material = {
-          ...updatedModel.material,
-          ...material
-        };
-        
-        // Also update the color property for consistency with ModelSelector
-        if (material.color) {
-          updatedModel.color = material.color;
-        }
-        
-        selectedModels.value[modelIndex] = updatedModel;
+    const handleModelMaterialChanged = (modelId, newMaterial) => {
+      const model = selectedModels.value.find(m => m.id === modelId);
+      if (model) {
+        model.material = newMaterial;
       }
     };
     
     return {
       selectedModels,
+      handleModelCreated,
       handleModelPositionChanged,
       handleModelRotationChanged,
       handleModelScaleChanged,
@@ -143,6 +150,10 @@ export default {
 
 h1 {
   margin: 0; /* Reset margin since it's now controlled by the parent div */
+}
+
+.drawing-tools-container {
+  margin-bottom: 10px;
 }
 
 .scene-container {

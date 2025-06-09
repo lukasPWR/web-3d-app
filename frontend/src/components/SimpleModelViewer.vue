@@ -181,10 +181,10 @@
                 max="1" 
                 step="0.1"
                 :value="selectedObjectMaterial.roughness" 
-                @input="updateMaterialProperty('roughness', parseFloat($event.target.value))"
+                @input="updateMaterialRoughness($event.target.value)"
                 class="material-slider"
               />
-              <span class="value-display">{{ selectedObjectMaterial.roughness.toFixed(1) }}</span>
+              <span>{{ selectedObjectMaterial.roughness }}</span>
             </div>
             
             <div class="axis-control">
@@ -195,10 +195,10 @@
                 max="1" 
                 step="0.1"
                 :value="selectedObjectMaterial.metalness" 
-                @input="updateMaterialProperty('metalness', parseFloat($event.target.value))"
+                @input="updateMaterialMetalness($event.target.value)"
                 class="material-slider"
               />
-              <span class="value-display">{{ selectedObjectMaterial.metalness.toFixed(1) }}</span>
+              <span>{{ selectedObjectMaterial.metalness }}</span>
             </div>
             
             <div class="axis-control">
@@ -1432,15 +1432,13 @@ export default {
       emitMaterialChange();
     };
     
-    // Emit material change event
-    const emitMaterialChange = () => {
-      if (!selectedObject.value) return;
-      
-      const modelId = selectedObject.value.userData.modelId;
-      emit('model-material-changed', { 
-        modelId, 
-        material: { ...selectedObjectMaterial.value } 
-      });
+    // Add missing material update functions
+    const updateMaterialRoughness = (value) => {
+      updateMaterialProperty('roughness', parseFloat(value));
+    };
+    
+    const updateMaterialMetalness = (value) => {
+      updateMaterialProperty('metalness', parseFloat(value));
     };
     
     // Highlight selected object
@@ -1715,6 +1713,8 @@ export default {
       updateMaterialColor,
       updateMaterialEmissive,
       updateMaterialProperty,
+      updateMaterialRoughness,
+      updateMaterialMetalness,
       handleTextureUpload,
       applySelectedTexture,
       getSelectedTextureUrl,

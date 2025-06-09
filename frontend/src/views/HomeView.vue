@@ -33,6 +33,10 @@ const goToSceneEditor = () => {
   router.push('/scene')
 }
 
+const goToCreateModel = () => {
+  router.push('/create')
+}
+
 onMounted(fetchModels)
 </script>
 
@@ -44,13 +48,16 @@ onMounted(fetchModels)
         <button @click="showUploader = !showUploader" class="upload-button">
           {{ showUploader ? 'Cancel Upload' : 'Upload New Model' }}
         </button>
+        <button @click="goToCreateModel" class="create-button">
+          Create Model
+        </button>
         <button @click="goToSceneEditor" class="scene-button">
           Create 3D Scene
         </button>
       </div>
     </div>
     
-    <p>Welcome to the 3D model viewer application. Upload models or create multi-model scenes!</p>
+    <p>Welcome to the 3D model viewer application. Upload models, create them programmatically, or create multi-model scenes!</p>
     
     <ModelUploader 
       v-if="showUploader" 
@@ -99,6 +106,21 @@ h1 {
 
 .upload-button:hover {
   background-color: #45a049;
+}
+
+.create-button {
+  padding: 0.5rem 1rem;
+  background-color: #FF9800;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-weight: bold;
+  transition: background-color 0.3s;
+}
+
+.create-button:hover {
+  background-color: #F57C00;
 }
 
 .scene-button {

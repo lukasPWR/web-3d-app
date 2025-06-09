@@ -3,6 +3,23 @@ import os
 import uuid
 from werkzeug.utils import secure_filename
 from flask_cors import CORS
+import shutil
+import logging
+
+# Set up logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+try:
+    from blender_service import BlenderDrawingService
+    blender_service = BlenderDrawingService()
+    logger.info("Blender service initialized successfully")
+except ImportError as e:
+    logger.error(f"Failed to import BlenderDrawingService: {e}")
+    blender_service = None
+except Exception as e:
+    logger.error(f"Failed to initialize Blender service: {e}")
+    blender_service = None
 
 app = Flask(__name__)
 CORS(app, resources={r"/*": {"origins": "*"}})
@@ -23,6 +40,9 @@ models = []
 
 # Textures storage
 textures = []
+
+# Initialize Blender service
+blender_service = BlenderDrawingService()
 
 def allowed_file(filename):
     """Check if file extension is allowed"""
@@ -257,6 +277,145 @@ def delete_texture(texture_id):
     
     return jsonify({"message": "Texture deleted successfully"}), 200
 
+@app.route('/api/draw/session', methods=['POST', 'OPTIONS'])
+def execute_drawing_session():
+    """Execute a complete drawing session using Blender"""
+    if request.method == 'OPTIONS':
+        return _build_cors_preflight_response()
+    
+    try:
+        session_data = request.get_json()
+        if not session_data:
+            return jsonify({"error": "No session data provided"}), 400
+        
+        success, output_path, error = blender_service.execute_drawing_session(session_data)
+        
+        if success and output_path:
+            # Copy the generated file to our models directory
+            filename = os.path.basename(output_path)
+            dest_path = os.path.join(MODELS_FOLDER, filename)
+            shutil.copy2(output_path, dest_path)
+            
+            # Create model entry
+            new_model = {
+                "id": str(uuid.uuid4()),
+                "name": session_data.get("output_name", "Generated Model"),
+                "description": "Generated using Blender drawing commands",
+                "modelUrl": f"/models/{filename}",
+                "format": session_data.get("output_format", "obj"),
+                "category": "generated"
+            }
+            
+            models.append(new_model)
+            return jsonify({
+                "success": True,
+                "model": new_model,
+                "session_id": session_data.get("session_id")
+            }), 201
+        else:
+            return jsonify({
+                "success": False,
+                "error": error or "Unknown drawing error"
+            }), 500
+            
+    except Exception as e:
+        return jsonify({
+            "success": False,
+            "error": f"Drawing session failed: {str(e)}"
+        }), 500
+
+@app.route('/api/draw/line', methods=['POST', 'OPTIONS'])
+def draw_line_endpoint():
+    """Draw a simple line"""
+    if request.method == 'OPTIONS':
+        return _build_cors_preflight_response()
+    
+    try:
+        data = request.get_json()
+        points = data.get('points', [])
+        color = data.get('color', '#ffffff')
+        thickness = data.get('thickness', 0.01)
+        name = data.get('name', 'Line')
+        
+        if len(points) < 2:
+            return jsonify({"error": "At least 2 points required"}), 400
+        
+        success, output_path, error = blender_service.create_line(points, color, thickness, name)
+        
+        if success and output_path:
+            # Copy to models directory
+            filename = os.path.basename(output_path)
+            dest_path = os.path.join(MODELS_FOLDER, filename)
+            shutil.copy2(output_path, dest_path)
+            
+            # Create model entry
+            new_model = {
+                "id": str(uuid.uuid4()),
+                "name": name,
+                "description": f"Line drawing with {len(points)} points",
+                "modelUrl": f"/models/{filename}",
+                "format": "obj",
+                "category": "generated"
+            }
+            
+            models.append(new_model)
+            return jsonify({"success": True, "model": new_model}), 201
+        else:
+            return jsonify({"success": False, "error": error}), 500
+            
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+@app.route('/api/draw/primitive', methods=['POST', 'OPTIONS'])
+def draw_primitive_endpoint():
+    """Draw a primitive shape"""
+    if request.method == 'OPTIONS':
+        return _build_cors_preflight_response()
+    
+    if not blender_service:
+        return jsonify({"success": False, "error": "Blender service not available"}), 503
+    
+    try:
+        data = request.get_json()
+        logger.info(f"Received primitive drawing request: {data}")
+        
+        primitive_type = data.get('primitive_type', 'cube')
+        location = data.get('location', [0, 0, 0])
+        scale = data.get('scale', [1, 1, 1])
+        color = data.get('color', '#8080ff')
+        name = data.get('name', f'{primitive_type.title()}_Generated')
+        
+        success, output_path, error = blender_service.create_primitive(
+            primitive_type, location, scale, color, name
+        )
+        
+        if success and output_path:
+            # Copy to models directory
+            filename = os.path.basename(output_path)
+            dest_path = os.path.join(MODELS_FOLDER, filename)
+            shutil.copy2(output_path, dest_path)
+            
+            # Create model entry
+            new_model = {
+                "id": str(uuid.uuid4()),
+                "name": name,
+                "description": f"Generated {primitive_type}",
+                "modelUrl": f"/models/{filename}",
+                "format": "obj",
+                "category": "generated"
+            }
+            
+            models.append(new_model)
+            logger.info(f"Successfully created primitive: {new_model}")
+            return jsonify({"success": True, "model": new_model}), 201
+        else:
+            logger.error(f"Primitive creation failed: {error}")
+            return jsonify({"success": False, "error": error}), 500
+            
+    except Exception as e:
+        logger.error(f"Exception in primitive drawing: {e}", exc_info=True)
+        return jsonify({"success": False, "error": str(e)}), 500
+
 def _build_cors_preflight_response():
     response = make_response()
     response.headers.add("Access-Control-Allow-Origin", "*")
@@ -277,7 +436,10 @@ def index():
             "DELETE /api/models/<model_id>": "Delete a model",
             "GET /api/textures": "List all textures",
             "POST /api/textures/upload": "Upload a new texture",
-            "DELETE /api/textures/<texture_id>": "Delete a texture"
+            "DELETE /api/textures/<texture_id>": "Delete a texture",
+            "POST /api/draw/session": "Execute a drawing session",
+            "POST /api/draw/line": "Draw a line",
+            "POST /api/draw/primitive": "Draw a primitive shape"
         }
     })
 

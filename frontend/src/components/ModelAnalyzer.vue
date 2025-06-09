@@ -459,6 +459,7 @@ export default {
               boundingBox: new THREE.Box3().setFromObject(child)
             };
             
+            analysis.meshes.push(meshDetail);
             analysis.meshDetails.push(meshDetail);
             analysis.maxVerticesInMesh = Math.max(analysis.maxVerticesInMesh, vertices);
             analysis.minVerticesInMesh = Math.min(analysis.minVerticesInMesh, vertices);
