@@ -13,34 +13,11 @@ from .draw_models import (
     execute_drawing_session,
 )
 
-# Try to import pydantic models, fall back to simple models if not available
-try:
-    from .data_models import (
-        Point3D,
-        Color,
-        LineCommand,
-        CurveCommand,
-        MeshCommand,
-        PrimitiveCommand,
-        DrawingSession,
-    )
-    PYDANTIC_AVAILABLE = True
-except ImportError:
-    # When running in Blender, use simple models instead
-    from .simple_models import Point3D, Color
-    PYDANTIC_AVAILABLE = False
-    
-    # Create dummy classes for API compatibility
-    class LineCommand:
-        pass
-    class CurveCommand:
-        pass
-    class MeshCommand:
-        pass
-    class PrimitiveCommand:
-        pass
-    class DrawingSession:
-        pass
+from .simple_models import (
+    Point3D,
+    Color,
+    parse_command_data,
+)
 
 __all__ = [
     "draw_line",
@@ -53,10 +30,5 @@ __all__ = [
     "execute_drawing_session",
     "Point3D",
     "Color",
-    "LineCommand",
-    "CurveCommand",
-    "MeshCommand",
-    "PrimitiveCommand",
-    "DrawingSession",
-    "PYDANTIC_AVAILABLE",
+    "parse_command_data",
 ]

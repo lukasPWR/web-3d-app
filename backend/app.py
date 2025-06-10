@@ -7,36 +7,202 @@ from werkzeug.utils import secure_filename
 from flask_cors import CORS
 import shutil
 import logging
+from pathlib import Path
+from typing import List, Dict, Optional, Tuple
+
+# Configuration constants
+class Config:
+    MAX_CONTENT_LENGTH = 100 * 1024 * 1024  # 100MB
+    ALLOWED_EXTENSIONS = {'obj', 'gltf', 'glb', 'fbx'}
+    ALLOWED_TEXTURE_EXTENSIONS = {'jpg', 'jpeg', 'png', 'bmp', 'tga', 'tiff'}
+    MIME_TYPES = {
+        'obj': 'application/octet-stream',
+        'gltf': 'model/gltf+json',
+        'glb': 'model/gltf-binary',
+        'fbx': 'application/octet-stream',
+        'jpg': 'image/jpeg',
+        'jpeg': 'image/jpeg',
+        'png': 'image/png',
+        'bmp': 'image/bmp',
+        'tga': 'image/tga',
+        'tiff': 'image/tiff'
+    }
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Create Flask app first
+# Create Flask app
 app = Flask(__name__)
 CORS(app, resources={r"/*": {"origins": "*"}})
+app.config['MAX_CONTENT_LENGTH'] = Config.MAX_CONTENT_LENGTH
 
-# Configuration
-MODELS_FOLDER = os.path.join(app.root_path, 'static/models')
-TEXTURES_FOLDER = os.path.join(app.root_path, 'static/textures')
-MODELS_DB_FILE = os.path.join(MODELS_FOLDER, 'models_db.json')
-TEXTURES_DB_FILE = os.path.join(TEXTURES_FOLDER, 'textures_db.json')
-ALLOWED_EXTENSIONS = {'obj', 'gltf', 'glb', 'fbx'}
-ALLOWED_TEXTURE_EXTENSIONS = {'jpg', 'jpeg', 'png', 'bmp', 'tga', 'tiff'}
-app.config['MAX_CONTENT_LENGTH'] = 100 * 1024 * 1024  # 100MB max upload size
+# Directory paths
+MODELS_FOLDER = Path(app.root_path) / 'static' / 'models'
+TEXTURES_FOLDER = Path(app.root_path) / 'static' / 'textures'
+MODELS_DB_FILE = MODELS_FOLDER / 'models_db.json'
+TEXTURES_DB_FILE = TEXTURES_FOLDER / 'textures_db.json'
 
 # Ensure directories exist
-os.makedirs(MODELS_FOLDER, exist_ok=True)
-os.makedirs(TEXTURES_FOLDER, exist_ok=True)
+MODELS_FOLDER.mkdir(parents=True, exist_ok=True)
+TEXTURES_FOLDER.mkdir(parents=True, exist_ok=True)
 
-# Helper functions
-def allowed_file(filename):
+# Global storage
+models: List[Dict] = []
+textures: List[Dict] = []
+
+def is_allowed_file(filename: str, allowed_extensions: set) -> bool:
     """Check if file extension is allowed"""
-    return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+    return '.' in filename and filename.rsplit('.', 1)[1].lower() in allowed_extensions
 
-def allowed_texture_file(filename):
-    """Check if texture file extension is allowed"""
-    return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_TEXTURE_EXTENSIONS
+def load_data_from_file(file_path: Path, data_type: str) -> List[Dict]:
+    """Load data from JSON file with error handling"""
+    try:
+        if file_path.exists():
+            with open(file_path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+                logger.info(f"Loaded {len(data)} {data_type} from database")
+                return data
+        else:
+            logger.info(f"No existing {data_type} database found")
+            return []
+    except Exception as e:
+        logger.error(f"Error loading {data_type} database: {e}")
+        return []
+
+def save_data_to_file(data: List[Dict], file_path: Path, data_type: str) -> bool:
+    """Save data to JSON file with error handling"""
+    try:
+        with open(file_path, 'w', encoding='utf-8') as f:
+            json.dump(data, f, indent=2, ensure_ascii=False)
+        logger.info(f"Saved {len(data)} {data_type} to database")
+        return True
+    except Exception as e:
+        logger.error(f"Error saving {data_type} database: {e}")
+        return False
+
+def create_file_entry(filename: str, original_name: str, file_stats: os.stat_result, 
+                     entry_type: str, request_data: Dict) -> Dict:
+    """Create a standardized file entry"""
+    display_name = request_data.get("name", Path(original_name).stem)
+    file_extension = Path(filename).suffix[1:].lower()
+    
+    base_entry = {
+        "id": str(uuid.uuid4()),
+        "name": display_name,
+        "description": request_data.get("description", f"Uploaded {entry_type}"),
+        "format": file_extension,
+        "category": request_data.get("category", "uploaded"),
+        "fileSize": file_stats.st_size,
+        "createdAt": datetime.now().isoformat(),
+    }
+    
+    if entry_type == "model":
+        base_entry.update({
+            "modelUrl": f"/models/{filename}",
+            "isGenerated": False
+        })
+    else:  # texture
+        base_entry.update({
+            "textureUrl": f"/textures/{filename}",
+            "type": request_data.get("type", "diffuse")
+        })
+    
+    return base_entry
+
+def scan_and_add_existing_files(folder_path: Path, extensions: set, 
+                               existing_data: List[Dict], url_key: str) -> int:
+    """Scan folder and add new files not in database"""
+    if not folder_path.exists():
+        return 0
+    
+    existing_filenames = {entry[url_key].split('/')[-1] for entry in existing_data if url_key in entry}
+    added_count = 0
+    
+    for file_path in folder_path.iterdir():
+        if file_path.is_file() and file_path.suffix[1:].lower() in extensions:
+            filename = file_path.name
+            if filename not in existing_filenames:
+                try:
+                    file_stats = file_path.stat()
+                    original_name = filename.split('_', 1)[1] if '_' in filename else filename
+                    display_name = Path(original_name).stem
+                    
+                    entry_type = "model" if url_key == "modelUrl" else "texture"
+                    new_entry = {
+                        "id": str(uuid.uuid4()),
+                        "name": display_name,
+                        "description": f"{entry_type.title()} loaded from file: {original_name}",
+                        "format": file_path.suffix[1:].lower(),
+                        "category": "loaded",
+                        "fileSize": file_stats.st_size,
+                        "createdAt": datetime.fromtimestamp(file_stats.st_ctime).isoformat(),
+                    }
+                    
+                    if entry_type == "model":
+                        new_entry.update({
+                            "modelUrl": f"/models/{filename}",
+                            "isGenerated": False
+                        })
+                    else:
+                        new_entry.update({
+                            "textureUrl": f"/textures/{filename}",
+                            "type": "diffuse"
+                        })
+                    
+                    existing_data.append(new_entry)
+                    added_count += 1
+                    logger.info(f"Added existing {entry_type}: {display_name}")
+                    
+                except Exception as e:
+                    logger.warning(f"Failed to add {filename}: {e}")
+    
+    return added_count
+
+def cleanup_missing_files() -> None:
+    """Remove database entries for files that no longer exist"""
+    global models, textures
+    
+    # Check models
+    models[:] = [m for m in models if _file_exists_for_entry(m, "modelUrl", MODELS_FOLDER)]
+    
+    # Check textures  
+    textures[:] = [t for t in textures if _file_exists_for_entry(t, "textureUrl", TEXTURES_FOLDER)]
+
+def _file_exists_for_entry(entry: Dict, url_key: str, folder: Path) -> bool:
+    """Check if file exists for database entry"""
+    if url_key not in entry:
+        return True  # Keep entries without URLs
+    
+    filename = entry[url_key].split('/')[-1]
+    file_path = folder / filename
+    exists = file_path.exists()
+    
+    if not exists:
+        logger.info(f"Removing missing {url_key.replace('Url', '')}: {entry['name']}")
+    
+    return exists
+
+def initialize_storage() -> None:
+    """Initialize storage system"""
+    global models, textures
+    
+    logger.info("Initializing storage system...")
+    
+    models = load_data_from_file(MODELS_DB_FILE, "models")
+    textures = load_data_from_file(TEXTURES_DB_FILE, "textures")
+    
+    cleanup_missing_files()
+    
+    models_added = scan_and_add_existing_files(MODELS_FOLDER, Config.ALLOWED_EXTENSIONS, models, "modelUrl")
+    textures_added = scan_and_add_existing_files(TEXTURES_FOLDER, Config.ALLOWED_TEXTURE_EXTENSIONS, textures, "textureUrl")
+    
+    if models_added:
+        save_data_to_file(models, MODELS_DB_FILE, "models")
+    if textures_added:
+        save_data_to_file(textures, TEXTURES_DB_FILE, "textures")
+    
+    logger.info(f"Storage initialized: {len(models)} models, {len(textures)} textures")
 
 # Initialize Blender service after app creation
 try:
@@ -50,224 +216,34 @@ except Exception as e:
     logger.error(f"Failed to initialize Blender service: {e}")
     blender_service = None
 
-# Sample models
-models = []
-
-# Textures storage
-textures = []
-
-def load_models_from_storage():
-    """Load models metadata from JSON file"""
-    global models
-    try:
-        if os.path.exists(MODELS_DB_FILE):
-            with open(MODELS_DB_FILE, 'r', encoding='utf-8') as f:
-                models = json.load(f)
-                logger.info(f"Loaded {len(models)} models from database")
-        else:
-            models = []
-            logger.info("No existing models database found")
-    except Exception as e:
-        logger.error(f"Error loading models database: {e}")
-        models = []
-
-def save_models_to_storage():
-    """Save models metadata to JSON file"""
-    try:
-        with open(MODELS_DB_FILE, 'w', encoding='utf-8') as f:
-            json.dump(models, f, indent=2, ensure_ascii=False)
-        logger.info(f"Saved {len(models)} models to database")
-    except Exception as e:
-        logger.error(f"Error saving models database: {e}")
-
-def load_textures_from_storage():
-    """Load textures metadata from JSON file"""
-    global textures
-    try:
-        if os.path.exists(TEXTURES_DB_FILE):
-            with open(TEXTURES_DB_FILE, 'r', encoding='utf-8') as f:
-                textures = json.load(f)
-                logger.info(f"Loaded {len(textures)} textures from database")
-        else:
-            textures = []
-            logger.info("No existing textures database found")
-    except Exception as e:
-        logger.error(f"Error loading textures database: {e}")
-        textures = []
-
-def save_textures_to_storage():
-    """Save textures metadata to JSON file"""
-    try:
-        with open(TEXTURES_DB_FILE, 'w', encoding='utf-8') as f:
-            json.dump(textures, f, indent=2, ensure_ascii=False)
-        logger.info(f"Saved {len(textures)} textures to database")
-    except Exception as e:
-        logger.error(f"Error saving textures database: {e}")
-
-def scan_and_load_existing_models():
-    """Scan models folder and add any new files not in database"""
-    global models
-    
-    if not os.path.exists(MODELS_FOLDER):
-        return
-    
-    # Get list of files already in database
-    existing_filenames = set()
-    for model in models:
-        if 'modelUrl' in model:
-            filename = model['modelUrl'].split('/')[-1]
-            existing_filenames.add(filename)
-    
-    # Scan folder for files
-    added_count = 0
-    for filename in os.listdir(MODELS_FOLDER):
-        if filename.lower().endswith(('.obj', '.gltf', '.glb', '.fbx')):
-            if filename not in existing_filenames:
-                # File exists but not in database - add it
-                file_path = os.path.join(MODELS_FOLDER, filename)
-                file_stats = os.stat(file_path)
-                
-                # Try to extract original name from filename
-                original_name = filename
-                if '_' in filename:
-                    # If filename contains UUID prefix, try to extract original name
-                    parts = filename.split('_', 1)
-                    if len(parts) > 1:
-                        original_name = parts[1]
-                
-                # Remove file extension for display name
-                display_name = os.path.splitext(original_name)[0]
-                file_extension = filename.rsplit('.', 1)[1].lower()
-                
-                new_model = {
-                    "id": str(uuid.uuid4()),
-                    "name": display_name,
-                    "description": f"Model loaded from file: {original_name}",
-                    "modelUrl": f"/models/{filename}",
-                    "format": file_extension,
-                    "category": "loaded",
-                    "fileSize": file_stats.st_size,
-                    "createdAt": datetime.fromtimestamp(file_stats.st_ctime).isoformat(),
-                    "isGenerated": False
-                }
-                
-                models.append(new_model)
-                added_count += 1
-                logger.info(f"Added existing model: {display_name}")
-    
-    if added_count > 0:
-        save_models_to_storage()
-        logger.info(f"Added {added_count} existing model files to database")
-
-def scan_and_load_existing_textures():
-    """Scan textures folder and add any new files not in database"""
-    global textures
-    
-    if not os.path.exists(TEXTURES_FOLDER):
-        return
-    
-    # Get list of files already in database
-    existing_filenames = set()
-    for texture in textures:
-        if 'textureUrl' in texture:
-            filename = texture['textureUrl'].split('/')[-1]
-            existing_filenames.add(filename)
-    
-    # Scan folder for files
-    added_count = 0
-    for filename in os.listdir(TEXTURES_FOLDER):
-        if filename.lower().endswith(('.jpg', '.jpeg', '.png', '.bmp', '.tga', '.tiff')):
-            if filename not in existing_filenames:
-                # File exists but not in database - add it
-                file_path = os.path.join(TEXTURES_FOLDER, filename)
-                file_stats = os.stat(file_path)
-                
-                # Try to extract original name from filename
-                original_name = filename
-                if '_' in filename:
-                    parts = filename.split('_', 1)
-                    if len(parts) > 1:
-                        original_name = parts[1]
-                
-                # Remove file extension for display name
-                display_name = os.path.splitext(original_name)[0]
-                file_extension = filename.rsplit('.', 1)[1].lower()
-                
-                new_texture = {
-                    "id": str(uuid.uuid4()),
-                    "name": display_name,
-                    "description": f"Texture loaded from file: {original_name}",
-                    "textureUrl": f"/textures/{filename}",
-                    "format": file_extension,
-                    "type": "diffuse",
-                    "category": "loaded",
-                    "fileSize": file_stats.st_size,
-                    "createdAt": datetime.fromtimestamp(file_stats.st_ctime).isoformat()
-                }
-                
-                textures.append(new_texture)
-                added_count += 1
-                logger.info(f"Added existing texture: {display_name}")
-    
-    if added_count > 0:
-        save_textures_to_storage()
-        logger.info(f"Added {added_count} existing texture files to database")
-
-def cleanup_missing_files():
-    """Remove database entries for files that no longer exist"""
-    global models, textures
-    
-    # Check models
-    models_to_remove = []
-    for model in models:
-        if 'modelUrl' in model:
-            filename = model['modelUrl'].split('/')[-1]
-            file_path = os.path.join(MODELS_FOLDER, filename)
-            if not os.path.exists(file_path):
-                models_to_remove.append(model)
-                logger.info(f"Removing missing model: {model['name']}")
-    
-    for model in models_to_remove:
-        models.remove(model)
-    
-    # Check textures
-    textures_to_remove = []
-    for texture in textures:
-        if 'textureUrl' in texture:
-            filename = texture['textureUrl'].split('/')[-1]
-            file_path = os.path.join(TEXTURES_FOLDER, filename)
-            if not os.path.exists(file_path):
-                textures_to_remove.append(texture)
-                logger.info(f"Removing missing texture: {texture['name']}")
-    
-    for texture in textures_to_remove:
-        textures.remove(texture)
-    
-    # Save changes if any files were removed
-    if models_to_remove:
-        save_models_to_storage()
-    if textures_to_remove:
-        save_textures_to_storage()
-
-def initialize_storage():
-    """Initialize storage system - load existing data and scan for new files"""
-    logger.info("Initializing storage system...")
-    
-    # Load existing databases
-    load_models_from_storage()
-    load_textures_from_storage()
-    
-    # Clean up missing files first
-    cleanup_missing_files()
-    
-    # Scan for new files
-    scan_and_load_existing_models()
-    scan_and_load_existing_textures()
-    
-    logger.info(f"Storage initialized: {len(models)} models, {len(textures)} textures")
-
-# Initialize storage system before starting the app
+# Initialize storage system
 initialize_storage()
+
+def _build_cors_preflight_response():
+    """Build CORS preflight response"""
+    response = make_response()
+    response.headers.add("Access-Control-Allow-Origin", "*")
+    response.headers.add("Access-Control-Allow-Headers", "Content-Type,Authorization")
+    response.headers.add("Access-Control-Allow-Methods", "GET,PUT,POST,DELETE,OPTIONS")
+    return response
+
+def serve_file_with_mime(folder: Path, filename: str) -> any:
+    """Serve file with proper MIME type and CORS headers"""
+    try:
+        extension = Path(filename).suffix[1:].lower()
+        mime_type = Config.MIME_TYPES.get(extension, 'application/octet-stream')
+        
+        response = make_response(send_from_directory(str(folder), filename))
+        response.headers['Content-Type'] = mime_type
+        response.headers['Access-Control-Allow-Origin'] = '*'
+        response.headers['Access-Control-Allow-Methods'] = 'GET, OPTIONS'
+        response.headers['Access-Control-Allow-Headers'] = 'Content-Type'
+        return response
+    except FileNotFoundError:
+        return jsonify({"error": f"File {filename} not found"}), 404
+    except Exception as e:
+        logger.error(f"Error serving file {filename}: {e}")
+        return jsonify({"error": "Internal server error"}), 500
 
 @app.route('/api/models', methods=['GET', 'OPTIONS'])
 def get_models():
@@ -275,7 +251,6 @@ def get_models():
     if request.method == 'OPTIONS':
         return _build_cors_preflight_response()
     
-    # Optional category filter
     category = request.args.get('category')
     if category:
         filtered_models = [model for model in models if model.get('category') == category]
@@ -309,72 +284,35 @@ def upload_model():
     if request.method == 'OPTIONS':
         return _build_cors_preflight_response()
     
-    # Check if file is in request
-    if 'file' not in request.files:
-        return jsonify({"error": "No file part"}), 400
-    
-    file = request.files['file']
-    
-    # Check if file was selected
-    if file.filename == '':
-        return jsonify({"error": "No file selected"}), 400
-    
-    # Validate file type
-    if not allowed_file(file.filename):
-        return jsonify({"error": f"File type not allowed. Supported formats: {', '.join(ALLOWED_EXTENSIONS)}"}), 400
-    
-    # Secure filename and save file
-    filename = secure_filename(file.filename)
-    file_extension = filename.rsplit('.', 1)[1].lower()
-    unique_filename = f"{uuid.uuid4()}_{filename}"
-    file_path = os.path.join(MODELS_FOLDER, unique_filename)
-    file.save(file_path)
-    
-    # Get file stats
-    file_stats = os.stat(file_path)
-    
-    # Create new model entry
-    new_model = {
-        "id": str(uuid.uuid4()),
-        "name": request.form.get("name", os.path.splitext(filename)[0]),
-        "description": request.form.get("description", "Uploaded 3D model"),
-        "modelUrl": f"/models/{unique_filename}",
-        "format": file_extension,
-        "category": request.form.get("category", "uploaded"),
-        "fileSize": file_stats.st_size,
-        "createdAt": datetime.now().isoformat(),
-        "isGenerated": False
-    }
-    
-    models.append(new_model)
-    save_models_to_storage()  # Save to persistent storage
-    return jsonify(new_model), 201
+    try:
+        file = request.files.get('file')
+        if not file or file.filename == '':
+            return jsonify({"error": "No file selected"}), 400
+        
+        if not is_allowed_file(file.filename, Config.ALLOWED_EXTENSIONS):
+            return jsonify({"error": f"File type not allowed. Supported: {', '.join(Config.ALLOWED_EXTENSIONS)}"}), 400
+        
+        filename = secure_filename(file.filename)
+        unique_filename = f"{uuid.uuid4()}_{filename}"
+        file_path = MODELS_FOLDER / unique_filename
+        
+        file.save(str(file_path))
+        file_stats = file_path.stat()
+        
+        new_model = create_file_entry(unique_filename, filename, file_stats, "model", request.form.to_dict())
+        models.append(new_model)
+        save_data_to_file(models, MODELS_DB_FILE, "models")
+        
+        return jsonify(new_model), 201
+        
+    except Exception as e:
+        logger.error(f"Upload error: {e}")
+        return jsonify({"error": "Upload failed"}), 500
 
 @app.route('/models/<path:filename>')
 def serve_model(filename):
-    """Serves 3D model files with proper MIME types"""
-    try:
-        mime_types = {
-            'obj': 'application/octet-stream',
-            'gltf': 'model/gltf+json',
-            'glb': 'model/gltf-binary',
-            'fbx': 'application/octet-stream'
-        }
-        
-        extension = filename.split('.')[-1].lower()
-        mime_type = mime_types.get(extension, 'application/octet-stream')
-        
-        response = make_response(send_from_directory(MODELS_FOLDER, filename))
-        response.headers['Content-Type'] = mime_type
-        response.headers['Access-Control-Allow-Origin'] = '*'
-        response.headers['Access-Control-Allow-Methods'] = 'GET, OPTIONS'
-        response.headers['Access-Control-Allow-Headers'] = 'Content-Type'
-        return response
-    except FileNotFoundError:
-        return jsonify({"error": f"Model file {filename} not found"}), 404
-    except Exception as e:
-        print(f"Error serving model {filename}: {e}")
-        return jsonify({"error": "Internal server error"}), 500
+    """Serves 3D model files"""
+    return serve_file_with_mime(MODELS_FOLDER, filename)
 
 @app.route('/api/models/<model_id>', methods=['DELETE', 'OPTIONS'])
 def delete_model(model_id):
@@ -389,15 +327,15 @@ def delete_model(model_id):
     # Remove file if it exists
     try:
         filename = model["modelUrl"].split("/")[-1]
-        file_path = os.path.join(MODELS_FOLDER, filename)
-        if os.path.exists(file_path):
-            os.remove(file_path)
+        file_path = MODELS_FOLDER / filename
+        if file_path.exists():
+            os.remove(str(file_path))
     except Exception as e:
         logger.error(f"Error removing file: {e}")
     
     # Remove from models list
     models[:] = [m for m in models if m["id"] != model_id]
-    save_models_to_storage()  # Save changes
+    save_data_to_file(models, MODELS_DB_FILE, "models")  # Save changes
     
     return jsonify({"message": "Model deleted successfully"}), 200
 
@@ -426,63 +364,22 @@ def upload_texture():
         return jsonify({"error": "No file selected"}), 400
     
     # Validate file type
-    if not allowed_texture_file(file.filename):
-        return jsonify({"error": f"File type not allowed. Supported formats: {', '.join(ALLOWED_TEXTURE_EXTENSIONS)}"}), 400
+    if not is_allowed_file(file.filename, Config.ALLOWED_TEXTURE_EXTENSIONS):
+        return jsonify({"error": f"File type not allowed. Supported: {', '.join(Config.ALLOWED_TEXTURE_EXTENSIONS)}"}), 400
     
     # Secure filename and save file
     filename = secure_filename(file.filename)
-    file_extension = filename.rsplit('.', 1)[1].lower()
     unique_filename = f"{uuid.uuid4()}_{filename}"
-    file_path = os.path.join(TEXTURES_FOLDER, unique_filename)
-    file.save(file_path)
+    file_path = TEXTURES_FOLDER / unique_filename
+    file.save(str(file_path))
     
     # Get file stats
-    file_stats = os.stat(file_path)
+    file_stats = file_path.stat()
     
-    # Create new texture entry
-    new_texture = {
-        "id": str(uuid.uuid4()),
-        "name": request.form.get("name", os.path.splitext(filename)[0]),
-        "description": request.form.get("description", "Uploaded texture"),
-        "textureUrl": f"/textures/{unique_filename}",
-        "format": file_extension,
-        "type": request.form.get("type", "diffuse"),
-        "category": request.form.get("category", "uploaded"),
-        "fileSize": file_stats.st_size,
-        "createdAt": datetime.now().isoformat()
-    }
-    
+    new_texture = create_file_entry(unique_filename, filename, file_stats, "texture", request.form.to_dict())
     textures.append(new_texture)
-    save_textures_to_storage()  # Save to persistent storage
+    save_data_to_file(textures, TEXTURES_DB_FILE, "textures")  # Save to persistent storage
     return jsonify(new_texture), 201
-
-@app.route('/textures/<path:filename>')
-def serve_texture(filename):
-    """Serves texture files with proper MIME types"""
-    try:
-        mime_types = {
-            'jpg': 'image/jpeg',
-            'jpeg': 'image/jpeg',
-            'png': 'image/png',
-            'bmp': 'image/bmp',
-            'tga': 'image/tga',
-            'tiff': 'image/tiff'
-        }
-        
-        extension = filename.split('.')[-1].lower()
-        mime_type = mime_types.get(extension, 'image/jpeg')
-        
-        response = make_response(send_from_directory(TEXTURES_FOLDER, filename))
-        response.headers['Content-Type'] = mime_type
-        response.headers['Access-Control-Allow-Origin'] = '*'
-        response.headers['Access-Control-Allow-Methods'] = 'GET, OPTIONS'
-        response.headers['Access-Control-Allow-Headers'] = 'Content-Type'
-        return response
-    except FileNotFoundError:
-        return jsonify({"error": f"Texture file {filename} not found"}), 404
-    except Exception as e:
-        print(f"Error serving texture {filename}: {e}")
-        return jsonify({"error": "Internal server error"}), 500
 
 @app.route('/api/textures/<texture_id>', methods=['DELETE', 'OPTIONS'])
 def delete_texture(texture_id):
@@ -497,15 +394,15 @@ def delete_texture(texture_id):
     # Remove file if it exists
     try:
         filename = texture["textureUrl"].split("/")[-1]
-        file_path = os.path.join(TEXTURES_FOLDER, filename)
-        if os.path.exists(file_path):
-            os.remove(file_path)
+        file_path = TEXTURES_FOLDER / filename
+        if file_path.exists():
+            os.remove(str(file_path))
     except Exception as e:
         logger.error(f"Error removing texture file: {e}")
     
     # Remove from textures list
     textures[:] = [t for t in textures if t["id"] != texture_id]
-    save_textures_to_storage()  # Save changes
+    save_data_to_file(textures, TEXTURES_DB_FILE, "textures")  # Save changes
     
     return jsonify({"message": "Texture deleted successfully"}), 200
 
@@ -569,11 +466,11 @@ def execute_drawing_session():
         if success and output_path:
             # Copy the generated file to our models directory
             filename = os.path.basename(output_path)
-            dest_path = os.path.join(MODELS_FOLDER, filename)
+            dest_path = MODELS_FOLDER / filename
             cleanup_generated_files(output_path, dest_path)
             
             # Get file stats
-            file_stats = os.stat(dest_path)
+            file_stats = dest_path.stat()
             
             # Create model entry
             new_model = {
@@ -589,7 +486,7 @@ def execute_drawing_session():
             }
             
             models.append(new_model)
-            save_models_to_storage()
+            save_data_to_file(models, MODELS_DB_FILE, "models")
             
             logger.info(f"Successfully created drawing session model: {new_model}")
             
@@ -636,11 +533,11 @@ def draw_line_endpoint():
         if success and output_path:
             # Copy to models directory
             filename = os.path.basename(output_path)
-            dest_path = os.path.join(MODELS_FOLDER, filename)
+            dest_path = MODELS_FOLDER / filename
             cleanup_generated_files(output_path, dest_path)
             
             # Get file stats
-            file_stats = os.stat(dest_path)
+            file_stats = dest_path.stat()
             
             # Create model entry
             new_model = {
@@ -656,7 +553,7 @@ def draw_line_endpoint():
             }
             
             models.append(new_model)
-            save_models_to_storage()
+            save_data_to_file(models, MODELS_DB_FILE, "models")
             
             return jsonify({"success": True, "model": new_model}), 201
         else:
@@ -691,11 +588,11 @@ def draw_primitive_endpoint():
         if success and output_path:
             # Copy to models directory with cleanup
             filename = os.path.basename(output_path)
-            dest_path = os.path.join(MODELS_FOLDER, filename)
+            dest_path = MODELS_FOLDER / filename
             cleanup_generated_files(output_path, dest_path)
             
             # Get file stats
-            file_stats = os.stat(dest_path)
+            file_stats = dest_path.stat()
             
             # Create model entry
             new_model = {
@@ -711,7 +608,7 @@ def draw_primitive_endpoint():
             }
             
             models.append(new_model)
-            save_models_to_storage()  # Save to persistent storage
+            save_data_to_file(models, MODELS_DB_FILE, "models")  # Save to persistent storage
             logger.info(f"Successfully created primitive: {new_model}")
             return jsonify({"success": True, "model": new_model}), 201
         else:
@@ -721,15 +618,6 @@ def draw_primitive_endpoint():
     except Exception as e:
         logger.error(f"Exception in primitive drawing: {e}", exc_info=True)
         return jsonify({"success": False, "error": str(e)}), 500
-
-
-
-def _build_cors_preflight_response():
-    response = make_response()
-    response.headers.add("Access-Control-Allow-Origin", "*")
-    response.headers.add("Access-Control-Allow-Headers", "Content-Type,Authorization")
-    response.headers.add("Access-Control-Allow-Methods", "GET,PUT,POST,DELETE,OPTIONS")
-    return response
 
 @app.route('/')
 def index():
@@ -760,44 +648,6 @@ def options_model(filename):
 @app.route('/textures/<path:filename>', methods=['OPTIONS'])
 def options_texture(filename):
     return _build_cors_preflight_response()
-
-def cleanup_output_drawings_folder():
-    """
-    Clean up the output/drawings folder by removing all generated files.
-    This is a more aggressive cleanup that removes everything.
-    """
-    try:
-        output_drawings_path = os.path.join(os.path.dirname(__file__), 'output', 'drawings')
-        
-        if not os.path.exists(output_drawings_path):
-            logger.info("Output drawings folder does not exist")
-            return
-        
-        files_removed = 0
-        total_files = 0
-        
-        # Remove all files in the directory
-        for item in os.listdir(output_drawings_path):
-            item_path = os.path.join(output_drawings_path, item)
-            total_files += 1
-            
-            try:
-                if os.path.isfile(item_path):
-                    os.remove(item_path)
-                    files_removed += 1
-                    logger.info(f"Removed file: {item}")
-                elif os.path.isdir(item_path):
-                    # Remove directory and all contents
-                    shutil.rmtree(item_path)
-                    files_removed += 1
-                    logger.info(f"Removed directory: {item}")
-            except Exception as e:
-                logger.warning(f"Failed to remove {item}: {e}")
-        
-        logger.info(f"Output cleanup completed: {files_removed}/{total_files} items removed from output/drawings")
-            
-    except Exception as e:
-        logger.error(f"Error cleaning output/drawings folder: {e}")
 
 # Add error handler for uncaught exceptions
 @app.errorhandler(Exception)

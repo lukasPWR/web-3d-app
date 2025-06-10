@@ -10,37 +10,25 @@ import os
 from pathlib import Path
 from typing import Dict, Any, Tuple, Optional
 
-
 class BlenderDrawingService:
     """Service for executing Blender drawing operations."""
     
     def __init__(self, blender_executable: str = r"C:\Program Files\Blender Foundation\Blender 4.4\blender.exe"):
-        """
-        Initialize the Blender service.
-        
-        Args:
-            blender_executable: Path to Blender executable
-        """
         self.blender_executable = blender_executable
-        self.script_template = self._get_execution_script_template()
+        self.timeout = 300  # 5 minutes
     
-    def _get_execution_script_template(self) -> str:
-        """Get the Python script template for Blender execution."""
-        return '''
+    def _create_execution_script(self, session_file: str, result_file: str) -> str:
+        """Create Python script for Blender execution."""
+        return f'''
 import sys
 import json
 import os
 from pathlib import Path
 
-# Get the directory where this script is being executed from
-script_dir = Path(__file__).parent
-backend_dir = script_dir.parent if script_dir.name.startswith('tmp') else script_dir
-
-# Find the actual backend directory by looking for blender_draw folder
-current_dir = Path(os.getcwd())
+# Find backend directory containing blender_draw module
 backend_candidates = [
-    current_dir,
-    current_dir / "backend",
+    Path(os.getcwd()),
+    Path(os.getcwd()) / "backend",
     Path(__file__).parent.parent,
     Path(__file__).parent.parent / "backend"
 ]
@@ -52,26 +40,18 @@ for candidate in backend_candidates:
         break
 
 if not backend_dir:
-    raise ImportError(f"Could not find blender_draw module. Searched in: {{[str(c) for c in backend_candidates]}}")
+    raise ImportError(f"Could not find blender_draw module")
 
-# Add the backend directory to Python path
 sys.path.insert(0, str(backend_dir))
 
-# Now import our drawing module
 try:
     from blender_draw.draw_models import execute_drawing_session
     
-    # Read session data from JSON file - use raw string or forward slashes
-    session_file = r"{session_file}"
-    result_file = r"{result_file}"
-    
-    with open(session_file, "r") as f:
+    with open(r"{session_file}", "r") as f:
         session_data = json.load(f)
     
-    # Execute drawing session
     session_id, output_path = execute_drawing_session(session_data)
     
-    # Write result to output file
     result = {{
         "success": True,
         "session_id": session_id,
@@ -79,137 +59,94 @@ try:
         "error": None
     }}
     
-    with open(result_file, "w") as f:
-        json.dump(result, f)
-        
 except Exception as e:
     import traceback
-    error_details = {{
-        "error": str(e),
-        "traceback": traceback.format_exc(),
-        "sys_path": sys.path,
-        "working_dir": os.getcwd(),
-        "backend_dir": str(backend_dir) if backend_dir else "None"
-    }}
-    
-    # Write error to output file
     result = {{
         "success": False,
         "session_id": None,
         "output_path": None,
         "error": str(e),
-        "details": error_details
+        "traceback": traceback.format_exc()
     }}
-    
-    with open(r"{result_file}", "w") as f:
-        json.dump(result, f)
+
+with open(r"{result_file}", "w") as f:
+    json.dump(result, f)
 '''
     
     def execute_drawing_session(self, session_data: Dict[str, Any]) -> Tuple[bool, Optional[str], Optional[str]]:
-        """
-        Execute a drawing session in headless Blender.
-        
-        Args:
-            session_data: Drawing session configuration
-            
-        Returns:
-            Tuple of (success, output_file_path, error_message)
-        """
-        # Generate unique session ID if not provided
+        """Execute a drawing session in headless Blender."""
         if "session_id" not in session_data:
             session_data["session_id"] = str(uuid.uuid4())
         
-        # Create temporary files for communication
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_path = Path(temp_dir)
             
-            # Write session data to JSON file
+            # Create session and result files
             session_file = temp_path / "session.json"
+            result_file = temp_path / "result.json"
+            script_file = temp_path / "execute_drawing.py"
+            
+            # Write files
             with open(session_file, "w") as f:
                 json.dump(session_data, f, default=str)
             
-            # Create result file path
-            result_file = temp_path / "result.json"
-            
-            # Create execution script with properly escaped paths
-            script_content = self.script_template.format(
-                session_file=str(session_file).replace('\\', '\\\\'),
-                result_file=str(result_file).replace('\\', '\\\\')
-            )
-            
-            script_file = temp_path / "execute_drawing.py"
+            script_content = self._create_execution_script(str(session_file), str(result_file))
             with open(script_file, "w", encoding='utf-8') as f:
                 f.write(script_content)
             
-            try:
-                # Execute Blender in headless mode
-                cmd = [
-                    self.blender_executable,
-                    "--background",
-                    "--python", str(script_file)
-                ]
-                
-                print(f"Executing Blender command: {' '.join(cmd)}")
-                
-                result = subprocess.run(
-                    cmd, 
-                    capture_output=True, 
-                    text=True, 
-                    timeout=300,  # 5 minute timeout
-                    cwd=str(Path(__file__).parent)  # Set working directory to backend folder
-                )
-                
-                print(f"Blender stdout: {result.stdout}")
-                print(f"Blender stderr: {result.stderr}")
-                
-                # Read result
-                if result_file.exists():
-                    with open(result_file, "r") as f:
-                        execution_result = json.load(f)
-                    
-                    if execution_result["success"]:
-                        return True, execution_result["output_path"], None
-                    else:
-                        error_msg = execution_result.get("error", "Unknown error")
-                        if "details" in execution_result:
-                            error_msg += f"\nDetails: {execution_result['details']}"
-                        return False, None, error_msg
-                else:
-                    return False, None, f"Blender execution failed. stdout: {result.stdout}, stderr: {result.stderr}"
-                    
-            except subprocess.TimeoutExpired:
-                return False, None, "Blender execution timed out"
-            except Exception as e:
-                return False, None, f"Execution error: {str(e)}"
+            return self._execute_blender_command(script_file, result_file)
     
-    def create_line(self, points: list, color: str = "#ffffff", 
-                   thickness: float = 0.01, name: str = "Line") -> Tuple[bool, Optional[str], Optional[str]]:
-        """
-        Create a simple line drawing.
-        
-        Args:
-            points: List of [x, y, z] coordinates
-            color: Hex color string
-            thickness: Line thickness
-            name: Object name
+    def _execute_blender_command(self, script_file: Path, result_file: Path) -> Tuple[bool, Optional[str], Optional[str]]:
+        """Execute Blender command and return results."""
+        try:
+            cmd = [
+                self.blender_executable,
+                "--background",
+                "--python", str(script_file)
+            ]
             
-        Returns:
-            Tuple of (success, output_file_path, error_message)
-        """
-        # Convert inputs to proper format without importing blender modules
-        point_objects = [{"x": p[0], "y": p[1], "z": p[2]} for p in points]
-        
-        # Convert hex color to RGBA dict
-        hex_color = color.lstrip('#')
+            result = subprocess.run(
+                cmd, 
+                capture_output=True, 
+                text=True, 
+                timeout=self.timeout,
+                cwd=str(Path(__file__).parent)
+            )
+            
+            if result_file.exists():
+                with open(result_file, "r") as f:
+                    execution_result = json.load(f)
+                
+                if execution_result["success"]:
+                    return True, execution_result["output_path"], None
+                else:
+                    return False, None, execution_result.get("error", "Unknown error")
+            else:
+                return False, None, f"Blender execution failed: {result.stderr}"
+                
+        except subprocess.TimeoutExpired:
+            return False, None, "Blender execution timed out"
+        except Exception as e:
+            return False, None, f"Execution error: {str(e)}"
+    
+    def _convert_hex_to_rgba(self, hex_color: str) -> Dict[str, float]:
+        """Convert hex color to RGBA dictionary."""
+        hex_color = hex_color.lstrip('#')
         if len(hex_color) == 6:
             hex_color += 'FF'
         
-        r = int(hex_color[0:2], 16) / 255.0
-        g = int(hex_color[2:4], 16) / 255.0
-        b = int(hex_color[4:6], 16) / 255.0
-        a = int(hex_color[6:8], 16) / 255.0
-        
-        color_obj = {"r": r, "g": g, "b": b, "a": a}
+        return {
+            "r": int(hex_color[0:2], 16) / 255.0,
+            "g": int(hex_color[2:4], 16) / 255.0,
+            "b": int(hex_color[4:6], 16) / 255.0,
+            "a": int(hex_color[6:8], 16) / 255.0
+        }
+    
+    def create_line(self, points: list, color: str = "#ffffff", 
+                   thickness: float = 0.01, name: str = "Line") -> Tuple[bool, Optional[str], Optional[str]]:
+        """Create a simple line drawing."""
+        point_objects = [{"x": p[0], "y": p[1], "z": p[2]} for p in points]
+        color_obj = self._convert_hex_to_rgba(color)
         
         session_data = {
             "session_id": str(uuid.uuid4()),
@@ -231,30 +168,8 @@ except Exception as e:
     def create_primitive(self, primitive_type: str, location: list = [0, 0, 0],
                         scale: list = [1, 1, 1], color: str = "#8080ff",
                         name: str = "Primitive") -> Tuple[bool, Optional[str], Optional[str]]:
-        """
-        Create a primitive shape.
-        
-        Args:
-            primitive_type: Type of primitive ('cube', 'sphere', etc.)
-            location: [x, y, z] location
-            scale: [x, y, z] scale
-            color: Hex color string
-            name: Object name
-            
-        Returns:
-            Tuple of (success, output_file_path, error_message)
-        """
-        # Convert hex color to RGBA dict
-        hex_color = color.lstrip('#')
-        if len(hex_color) == 6:
-            hex_color += 'FF'
-        
-        r = int(hex_color[0:2], 16) / 255.0
-        g = int(hex_color[2:4], 16) / 255.0
-        b = int(hex_color[4:6], 16) / 255.0
-        a = int(hex_color[6:8], 16) / 255.0
-        
-        color_obj = {"r": r, "g": g, "b": b, "a": a}
+        """Create a primitive shape."""
+        color_obj = self._convert_hex_to_rgba(color)
         
         session_data = {
             "session_id": str(uuid.uuid4()),

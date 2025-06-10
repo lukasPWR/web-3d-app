@@ -8,16 +8,11 @@ import bmesh
 import mathutils
 import os
 import uuid
-from typing import List, Tuple, Optional, Union
+from typing import List, Tuple
 from pathlib import Path
 
-# Use simple models when running in Blender (no pydantic dependency)
-try:
-    from .data_models import Point3D, Color, LineCommand, CurveCommand, MeshCommand, PrimitiveCommand
-    USE_PYDANTIC = True
-except ImportError:
-    from .simple_models import Point3D, Color, parse_command_data
-    USE_PYDANTIC = False
+# Use simple models - no pydantic dependency
+from .simple_models import Point3D, Color, parse_command_data
 
 
 def clear_scene() -> None:
@@ -449,66 +444,38 @@ def execute_drawing_session(session_data: dict) -> Tuple[str, str]:
     
     created_objects = []
     
-    # Execute each command
+    # Execute each command using simple parsing
     for cmd_type, cmd_data in commands:
         try:
-            if USE_PYDANTIC:
-                # Use pydantic models for validation
-                if cmd_type == "line":
-                    command = LineCommand(**cmd_data)
-                    obj_name = draw_line(
-                        command.points, command.color, command.thickness, command.name
-                    )
-                elif cmd_type == "curve":
-                    command = CurveCommand(**cmd_data)
-                    obj_name = draw_curve(
-                        command.control_points, command.color, 
-                        command.thickness, command.resolution, command.name
-                    )
-                elif cmd_type == "mesh":
-                    command = MeshCommand(**cmd_data)
-                    obj_name = draw_mesh(
-                        command.vertices, command.faces, 
-                        command.color, command.smooth, command.name
-                    )
-                elif cmd_type == "primitive":
-                    command = PrimitiveCommand(**cmd_data)
-                    obj_name = draw_primitive(
-                        command.primitive_type.value, command.location,
-                        command.scale, command.rotation, command.color, 
-                        command.name, **cmd_data
-                    )
-            else:
-                # Use simple parsing without pydantic
-                parsed_data = parse_command_data(cmd_type, cmd_data)
-                
-                if cmd_type == "line":
-                    obj_name = draw_line(
-                        parsed_data["points"], parsed_data["color"], 
-                        parsed_data["thickness"], parsed_data["name"]
-                    )
-                elif cmd_type == "curve":
-                    obj_name = draw_curve(
-                        parsed_data["control_points"], parsed_data["color"],
-                        parsed_data["thickness"], parsed_data["resolution"], 
-                        parsed_data["name"]
-                    )
-                elif cmd_type == "mesh":
-                    obj_name = draw_mesh(
-                        parsed_data["vertices"], parsed_data["faces"],
-                        parsed_data["color"], parsed_data["smooth"], 
-                        parsed_data["name"]
-                    )
-                elif cmd_type == "primitive":
-                    obj_name = draw_primitive(
-                        parsed_data["primitive_type"], parsed_data["location"],
-                        parsed_data["scale"], parsed_data["rotation"], 
-                        parsed_data["color"], parsed_data["name"],
-                        subdivisions=parsed_data["subdivisions"],
-                        radius=parsed_data["radius"],
-                        height=parsed_data["height"]
-                    )
+            parsed_data = parse_command_data(cmd_type, cmd_data)
             
+            if cmd_type == "line":
+                obj_name = draw_line(
+                    parsed_data["points"], parsed_data["color"], 
+                    parsed_data["thickness"], parsed_data["name"]
+                )
+            elif cmd_type == "curve":
+                obj_name = draw_curve(
+                    parsed_data["control_points"], parsed_data["color"],
+                    parsed_data["thickness"], parsed_data["resolution"], 
+                    parsed_data["name"]
+                )
+            elif cmd_type == "mesh":
+                obj_name = draw_mesh(
+                    parsed_data["vertices"], parsed_data["faces"],
+                    parsed_data["color"], parsed_data["smooth"], 
+                    parsed_data["name"]
+                )
+            elif cmd_type == "primitive":
+                obj_name = draw_primitive(
+                    parsed_data["primitive_type"], parsed_data["location"],
+                    parsed_data["scale"], parsed_data["rotation"], 
+                    parsed_data["color"], parsed_data["name"],
+                    subdivisions=parsed_data["subdivisions"],
+                    radius=parsed_data["radius"],
+                    height=parsed_data["height"]
+                )
+        
             created_objects.append(obj_name)
                 
         except Exception as e:
