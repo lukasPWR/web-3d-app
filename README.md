@@ -219,6 +219,8 @@ The backend provides a RESTful API for model and texture management:
    ```
 4. **Test Drawing**: Use the API endpoints to create simple models
 
+**Note**: Generated models are automatically copied to the static models folder and the original files in `output/drawings` are cleaned up to prevent disk space accumulation.
+
 ### Drawing API Examples
 
 **Create a Line:**

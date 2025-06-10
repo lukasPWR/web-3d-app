@@ -19,7 +19,7 @@
         </div>
         
         <div class="model-card-body">
-          <p>{{ model.description }}</p>
+          <p class="model-description">{{ model.description }}</p>
         </div>
         
         <div class="model-card-footer">
@@ -232,15 +232,17 @@ h2 {
   margin-bottom: 0.5rem;
 }
 
-.model-card-body p {
+.model-description {
   color: #666;
-  font-size: 0.75rem;
-  margin: 0;
-  line-height: 1.3;
-  overflow: hidden;
+  font-size: 12px;
+  margin-top: 4px;
   display: -webkit-box;
   -webkit-line-clamp: 2;
+  line-clamp: 2;
   -webkit-box-orient: vertical;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  line-height: 1.3;
 }
 
 .select-button {

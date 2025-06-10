@@ -64,46 +64,180 @@ class Color:
         return (self.r, self.g, self.b, self.a)
 
 
-def parse_command_data(cmd_type: str, cmd_data: Dict[str, Any]) -> Dict[str, Any]:
-    """Parse command data into appropriate format."""
+def parse_command_data(cmd_type: str, cmd_data: dict) -> dict:
+    """
+    Parse command data from dictionary format to our internal format.
     
+    Args:
+        cmd_type: Command type
+        cmd_data: Command data dictionary
+        
+    Returns:
+        Parsed command data
+    """
     if cmd_type == "line":
+        # Parse line command
+        points = []
+        for point_data in cmd_data.get("points", []):
+            if isinstance(point_data, dict):
+                points.append(Point3D(
+                    x=point_data.get("x", 0),
+                    y=point_data.get("y", 0),
+                    z=point_data.get("z", 0)
+                ))
+            elif isinstance(point_data, (list, tuple)) and len(point_data) >= 3:
+                points.append(Point3D(x=point_data[0], y=point_data[1], z=point_data[2]))
+        
+        color_data = cmd_data.get("color", {"r": 1.0, "g": 1.0, "b": 1.0, "a": 1.0})
+        if isinstance(color_data, dict):
+            color = Color(
+                r=color_data.get("r", 1.0),
+                g=color_data.get("g", 1.0),
+                b=color_data.get("b", 1.0),
+                a=color_data.get("a", 1.0)
+            )
+        else:
+            # Handle hex color
+            color = Color.from_hex(str(color_data))
+        
         return {
-            "points": [Point3D.from_dict(p) for p in cmd_data.get("points", [])],
-            "color": Color.from_dict(cmd_data.get("color", {})),
+            "points": points,
+            "color": color,
             "thickness": cmd_data.get("thickness", 0.01),
             "name": cmd_data.get("name", "Line")
         }
     
     elif cmd_type == "curve":
+        # Parse curve command
+        points = []
+        for point_data in cmd_data.get("control_points", []):
+            if isinstance(point_data, dict):
+                points.append(Point3D(
+                    x=point_data.get("x", 0),
+                    y=point_data.get("y", 0),
+                    z=point_data.get("z", 0)
+                ))
+            elif isinstance(point_data, (list, tuple)) and len(point_data) >= 3:
+                points.append(Point3D(x=point_data[0], y=point_data[1], z=point_data[2]))
+        
+        color_data = cmd_data.get("color", {"r": 1.0, "g": 1.0, "b": 1.0, "a": 1.0})
+        if isinstance(color_data, dict):
+            color = Color(
+                r=color_data.get("r", 1.0),
+                g=color_data.get("g", 1.0),
+                b=color_data.get("b", 1.0),
+                a=color_data.get("a", 1.0)
+            )
+        else:
+            color = Color.from_hex(str(color_data))
+        
         return {
-            "control_points": [Point3D.from_dict(p) for p in cmd_data.get("control_points", [])],
-            "color": Color.from_dict(cmd_data.get("color", {})),
+            "control_points": points,
+            "color": color,
             "thickness": cmd_data.get("thickness", 0.02),
             "resolution": cmd_data.get("resolution", 12),
             "name": cmd_data.get("name", "Curve")
         }
     
     elif cmd_type == "mesh":
+        # Parse mesh command
+        vertices = []
+        for vertex_data in cmd_data.get("vertices", []):
+            if isinstance(vertex_data, dict):
+                vertices.append(Point3D(
+                    x=vertex_data.get("x", 0),
+                    y=vertex_data.get("y", 0),
+                    z=vertex_data.get("z", 0)
+                ))
+            elif isinstance(vertex_data, (list, tuple)) and len(vertex_data) >= 3:
+                vertices.append(Point3D(x=vertex_data[0], y=vertex_data[1], z=vertex_data[2]))
+        
+        color_data = cmd_data.get("color", {"r": 1.0, "g": 1.0, "b": 1.0, "a": 1.0})
+        if isinstance(color_data, dict):
+            color = Color(
+                r=color_data.get("r", 1.0),
+                g=color_data.get("g", 1.0),
+                b=color_data.get("b", 1.0),
+                a=color_data.get("a", 1.0)
+            )
+        else:
+            color = Color.from_hex(str(color_data))
+        
         return {
-            "vertices": [Point3D.from_dict(v) for v in cmd_data.get("vertices", [])],
+            "vertices": vertices,
             "faces": cmd_data.get("faces", []),
-            "color": Color.from_dict(cmd_data.get("color", {})),
+            "color": color,
             "smooth": cmd_data.get("smooth", True),
             "name": cmd_data.get("name", "Mesh")
         }
     
     elif cmd_type == "primitive":
+        # Parse primitive command - fix the main issue here
+        primitive_type = cmd_data.get("primitive_type", "cube")
+        
+        # Parse location
+        location_data = cmd_data.get("location", {"x": 0, "y": 0, "z": 0})
+        if isinstance(location_data, dict):
+            location = Point3D(
+                x=location_data.get("x", 0),
+                y=location_data.get("y", 0),
+                z=location_data.get("z", 0)
+            )
+        elif isinstance(location_data, (list, tuple)) and len(location_data) >= 3:
+            location = Point3D(x=location_data[0], y=location_data[1], z=location_data[2])
+        else:
+            location = Point3D(x=0, y=0, z=0)
+        
+        # Parse scale
+        scale_data = cmd_data.get("scale", {"x": 1, "y": 1, "z": 1})
+        if isinstance(scale_data, dict):
+            scale = Point3D(
+                x=scale_data.get("x", 1),
+                y=scale_data.get("y", 1),
+                z=scale_data.get("z", 1)
+            )
+        elif isinstance(scale_data, (list, tuple)) and len(scale_data) >= 3:
+            scale = Point3D(x=scale_data[0], y=scale_data[1], z=scale_data[2])
+        else:
+            scale = Point3D(x=1, y=1, z=1)
+        
+        # Parse rotation
+        rotation_data = cmd_data.get("rotation", {"x": 0, "y": 0, "z": 0})
+        if isinstance(rotation_data, dict):
+            rotation = Point3D(
+                x=rotation_data.get("x", 0),
+                y=rotation_data.get("y", 0),
+                z=rotation_data.get("z", 0)
+            )
+        elif isinstance(rotation_data, (list, tuple)) and len(rotation_data) >= 3:
+            rotation = Point3D(x=rotation_data[0], y=rotation_data[1], z=rotation_data[2])
+        else:
+            rotation = Point3D(x=0, y=0, z=0)
+        
+        # Parse color
+        color_data = cmd_data.get("color", {"r": 0.5, "g": 0.5, "b": 1.0, "a": 1.0})
+        if isinstance(color_data, dict):
+            color = Color(
+                r=color_data.get("r", 0.5),
+                g=color_data.get("g", 0.5),
+                b=color_data.get("b", 1.0),
+                a=color_data.get("a", 1.0)
+            )
+        else:
+            # Handle hex color string
+            color = Color.from_hex(str(color_data))
+        
         return {
-            "primitive_type": cmd_data.get("primitive_type", "cube"),
-            "location": Point3D.from_dict(cmd_data.get("location", {})),
-            "scale": Point3D.from_dict(cmd_data.get("scale", {"x": 1, "y": 1, "z": 1})),
-            "rotation": Point3D.from_dict(cmd_data.get("rotation", {})),
-            "color": Color.from_dict(cmd_data.get("color", {})),
+            "primitive_type": primitive_type,
+            "location": location,
+            "scale": scale,
+            "rotation": rotation,
+            "color": color,
             "name": cmd_data.get("name", "Primitive"),
             "subdivisions": cmd_data.get("subdivisions", 2),
             "radius": cmd_data.get("radius", 1.0),
             "height": cmd_data.get("height", 2.0)
         }
     
-    return cmd_data
+    else:
+        raise ValueError(f"Unknown command type: {cmd_type}")

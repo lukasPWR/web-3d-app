@@ -344,8 +344,15 @@ def export_obj_file(filepath: str, selected_only: bool = False) -> str:
             export_selected_objects=selected_only,
             export_materials=True,
             export_uv=True,
-            export_normals=True
+            export_normals=True,
+            export_smooth_groups=False,  # Simplify output
+            export_material_groups=False,  # Don't create separate material groups
+            path_mode='COPY'  # Copy textures if any
         )
+        
+        # Clean up the OBJ file to remove MTL reference if no materials are actually exported
+        _cleanup_obj_file(abs_path)
+        
         return abs_path
     except AttributeError:
         # Fallback to old API for Blender < 4.4
@@ -355,8 +362,14 @@ def export_obj_file(filepath: str, selected_only: bool = False) -> str:
                 use_selection=selected_only,
                 use_materials=True,
                 use_uvs=True,
-                use_normals=True
+                use_normals=True,
+                use_smooth_groups=False,
+                path_mode='COPY'
             )
+            
+            # Clean up the OBJ file
+            _cleanup_obj_file(abs_path)
+            
             return abs_path
         except AttributeError:
             # If both fail, try manual export or alternative method
@@ -364,6 +377,55 @@ def export_obj_file(filepath: str, selected_only: bool = False) -> str:
             blend_path = abs_path.replace('.obj', '.blend')
             return save_blend_file(blend_path)
 
+def _cleanup_obj_file(obj_filepath: str):
+    """
+    Clean up OBJ file to remove MTL references if MTL file doesn't exist or is empty.
+    
+    Args:
+        obj_filepath: Path to the OBJ file
+    """
+    try:
+        # Check if MTL file exists and has content
+        mtl_filepath = obj_filepath.replace('.obj', '.mtl')
+        mtl_exists = os.path.exists(mtl_filepath)
+        mtl_has_content = False
+        
+        if mtl_exists:
+            with open(mtl_filepath, 'r') as f:
+                content = f.read().strip()
+                # Check if MTL file has actual material definitions
+                mtl_has_content = 'newmtl' in content and len(content.split('\n')) > 5
+        
+        # Read OBJ file
+        with open(obj_filepath, 'r') as f:
+            lines = f.readlines()
+        
+        # Filter out MTL-related lines if MTL doesn't exist or is empty
+        cleaned_lines = []
+        for line in lines:
+            line_stripped = line.strip()
+            
+            if not mtl_has_content:
+                # Remove MTL library reference and material usage if no proper MTL
+                if line_stripped.startswith('mtllib ') or line_stripped.startswith('usemtl '):
+                    continue
+            
+            cleaned_lines.append(line)
+        
+        # Write cleaned OBJ file
+        with open(obj_filepath, 'w') as f:
+            f.writelines(cleaned_lines)
+        
+        # Remove empty or minimal MTL file
+        if mtl_exists and not mtl_has_content:
+            try:
+                os.remove(mtl_filepath)
+                print(f"Removed empty MTL file: {mtl_filepath}")
+            except OSError:
+                pass
+                
+    except Exception as e:
+        print(f"Warning: Could not clean up OBJ file {obj_filepath}: {e}")
 
 def execute_drawing_session(session_data: dict) -> Tuple[str, str]:
     """
