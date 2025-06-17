@@ -422,7 +422,7 @@ def cleanup_generated_files(output_path: str, dest_path: str):
         # Handle MTL files for OBJ exports
         if output_path.endswith('.obj'):
             source_mtl = output_path.replace('.obj', '.mtl')
-            dest_mtl = dest_path.replace('.obj', '.mtl')
+            dest_mtl = str(dest_path).replace('.obj', '.mtl')
             
             # Copy MTL file if it exists and has content
             if os.path.exists(source_mtl):
