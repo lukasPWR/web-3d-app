@@ -67,9 +67,99 @@ def _create_material(name: str, color: Color):
     return material
 
 
+def optimize_vertices_advanced(vertices: List[Tuple[float, float, float]], precision: int = 3, 
+                             use_float32: bool = True) -> Tuple[List[Tuple[float, float, float]], List[int]]:
+    """
+    Advanced vertex optimization with Float32Array-like precision and deduplication.
+    
+    Args:
+        vertices: List of vertex coordinates
+        precision: Decimal precision for quantization
+        use_float32: Use Float32 precision instead of Float64
+        
+    Returns:
+        Tuple of (unique_vertices, index_mapping)
+    """
+    import struct
+    
+    factor = 10 ** precision
+    vertex_map = {}
+    unique_vertices = []
+    indices = []
+    
+    for vertex in vertices:
+        x, y, z = vertex
+        
+        # Apply Float32 precision if requested
+        if use_float32:
+            # Convert to Float32 precision (4 bytes) like JavaScript Float32Array
+            x = struct.unpack('f', struct.pack('f', x))[0]
+            y = struct.unpack('f', struct.pack('f', y))[0] 
+            z = struct.unpack('f', struct.pack('f', z))[0]
+        
+        # Quantize coordinates
+        x = round(x * factor) / factor
+        y = round(y * factor) / factor
+        z = round(z * factor) / factor
+        
+        key = (x, y, z)
+        if key not in vertex_map:
+            vertex_map[key] = len(unique_vertices)
+            unique_vertices.append(key)
+        
+        indices.append(vertex_map[key])
+    
+    return unique_vertices, indices
+
+
+def compress_geometry_data(vertices: List[Tuple[float, float, float]], 
+                          faces: List[List[int]] = None) -> dict:
+    """
+    Compress geometry data for optimal storage and transmission.
+    
+    Args:
+        vertices: Vertex coordinates
+        faces: Face definitions
+        
+    Returns:
+        Dictionary with compressed geometry data
+    """
+    # Optimize vertices with deduplication
+    unique_vertices, vertex_indices = optimize_vertices_advanced(vertices, precision=3, use_float32=True)
+    
+    # Calculate compression ratio
+    original_count = len(vertices)
+    compressed_count = len(unique_vertices)
+    compression_ratio = compressed_count / original_count if original_count > 0 else 1.0
+    
+    # Flatten vertex data for efficient storage
+    flattened_vertices = []
+    for vertex in unique_vertices:
+        flattened_vertices.extend(vertex)
+    
+    result = {
+        "vertices": flattened_vertices,  # Flat array like Float32Array
+        "vertex_count": len(unique_vertices),
+        "original_vertex_count": original_count,
+        "compression_ratio": compression_ratio,
+        "vertex_indices": vertex_indices
+    }
+    
+    if faces:
+        # Remap face indices to use compressed vertices
+        compressed_faces = []
+        for face in faces:
+            compressed_face = [vertex_indices[i] for i in face if i < len(vertex_indices)]
+            if len(compressed_face) >= 3:  # Valid face
+                compressed_faces.append(compressed_face)
+        result["faces"] = compressed_faces
+    
+    return result
+
+
 def draw_line(points: List[Point3D], color: Color, thickness: float = 0.01, name: str = "Line") -> str:
     """
-    Draw a line or polyline in Blender using mesh geometry.
+    Draw a line or polyline in Blender using mesh geometry with vertex optimization.
     
     Args:
         points: List of 3D points defining the line
@@ -86,6 +176,13 @@ def draw_line(points: List[Point3D], color: Color, thickness: float = 0.01, name
     if len(points) < 2:
         raise ValueError("Line requires at least 2 points")
     
+    # Convert points to tuples and optimize
+    vertices = [point.to_tuple() for point in points]
+    compressed_data = compress_geometry_data(vertices)
+    
+    print(f"Line vertices optimized: {compressed_data['original_vertex_count']} -> {compressed_data['vertex_count']} "
+          f"(ratio: {compressed_data['compression_ratio']:.3f})")
+    
     # Create mesh and object
     mesh = bpy.data.meshes.new(name=f"{name}_mesh")
     obj = bpy.data.objects.new(name, mesh)
@@ -96,15 +193,18 @@ def draw_line(points: List[Point3D], color: Color, thickness: float = 0.01, name
     # Create bmesh for easier mesh manipulation
     bm = bmesh.new()
     
-    # Add vertices
+    # Add optimized vertices
     vertices = []
-    for point in points:
-        vert = bm.verts.new(point.to_tuple())
+    optimized_vertices = compressed_data["vertices"]
+    for i in range(0, len(optimized_vertices), 3):
+        vert = bm.verts.new((optimized_vertices[i], optimized_vertices[i+1], optimized_vertices[i+2]))
         vertices.append(vert)
     
-    # Create edges between consecutive vertices
-    for i in range(len(vertices) - 1):
-        bm.edges.new([vertices[i], vertices[i + 1]])
+    # Create edges between consecutive vertices using original point order
+    vertex_indices = compressed_data["vertex_indices"]
+    for i in range(len(vertex_indices) - 1):
+        if vertex_indices[i] < len(vertices) and vertex_indices[i+1] < len(vertices):
+            bm.edges.new([vertices[vertex_indices[i]], vertices[vertex_indices[i+1]]])
     
     # Convert to mesh with thickness using solidify
     if thickness > 0:
@@ -501,10 +601,18 @@ def execute_drawing_session(session_data: dict) -> Tuple[str, str]:
     return session_id, final_path
 
 
+def optimize_vertices(vertices: List[Tuple[float, float, float]], precision: int = 3) -> List[Tuple[float, float, float]]:
+    """
+    Legacy function - use optimize_vertices_advanced for better performance.
+    """
+    unique_vertices, _ = optimize_vertices_advanced(vertices, precision, use_float32=True)
+    return unique_vertices
+
+
 def draw_custom_mesh_from_coords(coordinates_text: str, color: Color, name: str = "CustomMesh", 
                                 use_convex_hull: bool = True) -> str:
     """
-    Create a custom mesh from coordinate text input, similar to Blender addon.
+    Create a custom mesh from coordinate text input with vertex optimization.
     
     Args:
         coordinates_text: Text with coordinates, one vertex per line: "x y z" or "(x y z)"
@@ -541,17 +649,29 @@ def draw_custom_mesh_from_coords(coordinates_text: str, color: Color, name: str 
     if len(vertices) < 3:
         raise ValueError("At least 3 vertices are required")
     
+    # Apply advanced vertex optimization
+    compressed_data = compress_geometry_data(vertices)
+    
+    print(f"Custom mesh vertices optimized: {compressed_data['original_vertex_count']} -> {compressed_data['vertex_count']} "
+          f"(compression ratio: {compressed_data['compression_ratio']:.3f})")
+    
     # Create mesh and object
     mesh = bpy.data.meshes.new(name=f"{name}_mesh")
     obj = bpy.data.objects.new(name, mesh)
     
-    # Create initial mesh from vertices
+    # Reconstruct optimized vertices
+    optimized_vertices = []
+    flattened = compressed_data["vertices"]
+    for i in range(0, len(flattened), 3):
+        optimized_vertices.append((flattened[i], flattened[i+1], flattened[i+2]))
+    
+    # Create initial mesh from optimized vertices
     if use_convex_hull:
         # Create bmesh for convex hull operation
         bm = bmesh.new()
         
-        # Add vertices to bmesh
-        for vertex in vertices:
+        # Add optimized vertices to bmesh
+        for vertex in optimized_vertices:
             bm.verts.new(vertex)
         
         # Apply convex hull to generate faces
@@ -562,22 +682,23 @@ def draw_custom_mesh_from_coords(coordinates_text: str, color: Color, name: str 
         bm.free()
     else:
         # For simple case without convex hull, create basic triangular faces
-        # This ensures the mesh has faces and can be rendered
         faces = []
-        if len(vertices) >= 4:
+        vertex_count = len(optimized_vertices)
+        
+        if vertex_count >= 4:
             # Create tetrahedron-like faces for 4+ vertices
             faces = [
                 [0, 1, 2],
-                [0, 2, 3],
-                [0, 3, 1],
-                [1, 2, 3]
+                [0, 2, 3 % vertex_count],
+                [0, 3 % vertex_count, 1],
+                [1, 2, 3 % vertex_count]
             ]
-        elif len(vertices) == 3:
+        elif vertex_count == 3:
             # Single triangle
             faces = [[0, 1, 2]]
         
-        # Create mesh from vertices and faces
-        mesh.from_pydata(vertices, [], faces)
+        # Create mesh from optimized vertices and faces
+        mesh.from_pydata(optimized_vertices, [], faces)
     
     mesh.update()
     

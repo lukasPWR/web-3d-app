@@ -19,6 +19,10 @@ class BlenderDrawingService:
     
     def _create_execution_script(self, session_file: str, result_file: str) -> str:
         """Create Python script for Blender execution."""
+        # Use repr() to properly escape paths for Python strings
+        session_file_repr = repr(session_file)
+        result_file_repr = repr(result_file)
+        
         return f'''
 import sys
 import json
@@ -61,8 +65,8 @@ try:
     logger.info("Importing blender_draw.draw_models")
     from blender_draw.draw_models import execute_drawing_session
     
-    logger.info("Reading session data from: {session_file}")
-    with open(r"{session_file}", "r") as f:
+    logger.info(f"Reading session data from: {session_file_repr}")
+    with open({session_file_repr}, "r") as f:
         session_data = json.load(f)
     
     logger.info(f"Session data loaded: {{json.dumps(session_data, indent=2)}}")
@@ -108,8 +112,8 @@ except Exception as e:
         "traceback": tb
     }}
 
-logger.info(f"Writing result to: {result_file}")
-with open(r"{result_file}", "w") as f:
+logger.info(f"Writing result to: {result_file_repr}")
+with open({result_file_repr}, "w") as f:
     json.dump(result, f, indent=2)
 
 logger.info("Blender execution script completed")
