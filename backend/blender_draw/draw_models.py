@@ -3,9 +3,9 @@ Core Blender drawing functions for programmatic 3D model creation.
 Uses Blender's data API for reliable headless operation.
 """
 
-import bpy
-import bmesh
-import mathutils
+import bpy  # type: ignore
+import bmesh  # type: ignore
+import mathutils  # type: ignore
 import os
 import uuid
 from typing import List, Tuple

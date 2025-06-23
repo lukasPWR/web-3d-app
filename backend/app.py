@@ -4,7 +4,6 @@ import uuid
 import json
 from datetime import datetime
 from werkzeug.utils import secure_filename
-from flask_cors import CORS
 import shutil
 import logging
 from pathlib import Path
@@ -34,7 +33,6 @@ logger = logging.getLogger(__name__)
 
 # Create Flask app
 app = Flask(__name__)
-CORS(app, resources={r"/*": {"origins": "*"}})
 app.config['MAX_CONTENT_LENGTH'] = Config.MAX_CONTENT_LENGTH
 
 # Directory paths
@@ -309,10 +307,19 @@ def upload_model():
         logger.error(f"Upload error: {e}")
         return jsonify({"error": "Upload failed"}), 500
 
-@app.route('/models/<path:filename>')
+@app.route('/models/<path:filename>', methods=['GET', 'OPTIONS'])
 def serve_model(filename):
-    """Serves 3D model files"""
+    """Serves 3D model files with CORS support"""
+    if request.method == 'OPTIONS':
+        return _build_cors_preflight_response()
     return serve_file_with_mime(MODELS_FOLDER, filename)
+
+@app.route('/textures/<path:filename>', methods=['GET', 'OPTIONS'])
+def serve_texture(filename):
+    """Serves texture files with CORS support"""
+    if request.method == 'OPTIONS':
+        return _build_cors_preflight_response()
+    return serve_file_with_mime(TEXTURES_FOLDER, filename)
 
 @app.route('/api/models/<model_id>', methods=['DELETE', 'OPTIONS'])
 def delete_model(model_id):
@@ -640,14 +647,14 @@ def index():
         }
     })
 
-# Add OPTIONS handlers for model and texture routes
-@app.route('/models/<path:filename>', methods=['OPTIONS'])
-def options_model(filename):
-    return _build_cors_preflight_response()
+# Remove these duplicate route handlers that are causing conflicts:
+# @app.route('/models/<path:filename>', methods=['OPTIONS'])
+# def options_model(filename):
+#     return _build_cors_preflight_response()
 
-@app.route('/textures/<path:filename>', methods=['OPTIONS'])
-def options_texture(filename):
-    return _build_cors_preflight_response()
+# @app.route('/textures/<path:filename>', methods=['OPTIONS'])
+# def options_texture(filename):
+#     return _build_cors_preflight_response()
 
 # Add error handler for uncaught exceptions
 @app.errorhandler(Exception)
