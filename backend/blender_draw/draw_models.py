@@ -475,6 +475,11 @@ def execute_drawing_session(session_data: dict) -> Tuple[str, str]:
                     radius=parsed_data["radius"],
                     height=parsed_data["height"]
                 )
+            elif cmd_type == "custom_coords":
+                obj_name = draw_custom_mesh_from_coords(
+                    parsed_data["coordinates_text"], parsed_data["color"],
+                    parsed_data["name"], parsed_data["use_convex_hull"]
+                )
         
             created_objects.append(obj_name)
                 
@@ -494,3 +499,100 @@ def execute_drawing_session(session_data: dict) -> Tuple[str, str]:
         final_path = export_obj_file(str(output_path))
     
     return session_id, final_path
+
+
+def draw_custom_mesh_from_coords(coordinates_text: str, color: Color, name: str = "CustomMesh", 
+                                use_convex_hull: bool = True) -> str:
+    """
+    Create a custom mesh from coordinate text input, similar to Blender addon.
+    
+    Args:
+        coordinates_text: Text with coordinates, one vertex per line: "x y z" or "(x y z)"
+        color: Mesh color
+        name: Object name
+        use_convex_hull: Whether to apply convex hull operation
+        
+    Returns:
+        Name of created object
+        
+    Raises:
+        ValueError: If coordinates are invalid
+    """
+    # Parse coordinates from text
+    vertices = []
+    for i, line in enumerate(coordinates_text.strip().splitlines()):
+        line = line.strip()
+        if not line:
+            continue
+            
+        # Remove parentheses if present
+        line = line.replace("(", "").replace(")", "")
+        parts = line.split()
+        
+        if len(parts) != 3:
+            raise ValueError(f"Line {i+1} must have exactly 3 values (x y z)")
+        
+        try:
+            x, y, z = [float(v) for v in parts]
+            vertices.append((x, y, z))
+        except ValueError:
+            raise ValueError(f"Line {i+1} contains non-numeric values")
+    
+    if len(vertices) < 3:
+        raise ValueError("At least 3 vertices are required")
+    
+    # Create mesh and object
+    mesh = bpy.data.meshes.new(name=f"{name}_mesh")
+    obj = bpy.data.objects.new(name, mesh)
+    
+    # Create initial mesh from vertices
+    if use_convex_hull:
+        # Create bmesh for convex hull operation
+        bm = bmesh.new()
+        
+        # Add vertices to bmesh
+        for vertex in vertices:
+            bm.verts.new(vertex)
+        
+        # Apply convex hull to generate faces
+        bmesh.ops.convex_hull(bm, input=bm.verts)
+        
+        # Update mesh from bmesh
+        bm.to_mesh(mesh)
+        bm.free()
+    else:
+        # For simple case without convex hull, create basic triangular faces
+        # This ensures the mesh has faces and can be rendered
+        faces = []
+        if len(vertices) >= 4:
+            # Create tetrahedron-like faces for 4+ vertices
+            faces = [
+                [0, 1, 2],
+                [0, 2, 3],
+                [0, 3, 1],
+                [1, 2, 3]
+            ]
+        elif len(vertices) == 3:
+            # Single triangle
+            faces = [[0, 1, 2]]
+        
+        # Create mesh from vertices and faces
+        mesh.from_pydata(vertices, [], faces)
+    
+    mesh.update()
+    
+    # Link to scene
+    bpy.context.collection.objects.link(obj)
+    
+    # Create and assign material
+    material = _create_material(f"{name}_material", color)
+    obj.data.materials.append(material)
+    
+    # Recalculate normals
+    bpy.context.view_layer.objects.active = obj
+    obj.select_set(True)
+    bpy.ops.object.mode_set(mode='EDIT')
+    bpy.ops.mesh.normals_make_consistent(inside=False)
+    bpy.ops.object.mode_set(mode='OBJECT')
+    
+    return obj.name

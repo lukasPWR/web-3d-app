@@ -30,6 +30,58 @@
           <button @click="showAdvancedDrawer = true" class="draw-btn advanced-btn">
             ⚙️ Advanced Drawing
           </button>
+          <button @click="showCustomCoordsDrawer = true" class="draw-btn custom-coords-btn">
+            📊 Custom Coordinates
+          </button>
+        </div>
+      </div>
+      
+      <!-- Custom Coordinates Drawing Section -->
+      <div v-if="showCustomCoordsDrawer" class="section">
+        <h4>Custom Mesh from Coordinates</h4>
+        <div class="custom-coords-form">
+          <div class="form-group">
+            <label>Mesh Name:</label>
+            <input v-model="customCoordsParams.name" type="text" placeholder="My Custom Mesh" class="form-input">
+          </div>
+          
+          <div class="form-group">
+            <label>Mesh Color:</label>
+            <input v-model="customCoordsParams.color" type="color" class="color-input">
+          </div>
+          
+          <div class="form-group">
+            <label>
+              <input v-model="customCoordsParams.useConvexHull" type="checkbox">
+              Use Convex Hull (creates solid from points)
+            </label>
+          </div>
+          
+          <div class="form-group">
+            <label>Coordinates (X Y Z per line):</label>
+            <textarea 
+              v-model="customCoordsParams.coordinatesText" 
+              class="coordinates-textarea"
+              placeholder="0.0 0.0 0.0
+1.0 0.0 0.0
+0.5 1.0 0.0
+0.5 0.5 1.0"
+              rows="8"
+            ></textarea>
+            <div class="coordinates-help">
+              <small>
+                Enter coordinates with X, Y, Z values separated by spaces, one point per line.
+                Example: "1.0 2.0 3.0" represents point at (1, 2, 3).
+              </small>
+            </div>
+          </div>
+          
+          <div class="form-actions">
+            <button @click="drawCustomCoords" class="draw-btn" :disabled="isDrawing">
+              {{ isDrawing ? 'Creating...' : 'Create Custom Mesh' }}
+            </button>
+            <button @click="showCustomCoordsDrawer = false" class="cancel-btn">Cancel</button>
+          </div>
         </div>
       </div>
       
@@ -186,6 +238,7 @@ export default {
     const showDrawer = ref(false);
     const showLineDrawer = ref(false);
     const showAdvancedDrawer = ref(false);
+    const showCustomCoordsDrawer = ref(false);
     const isDrawing = ref(false);
     const drawingResult = ref(null);
     
@@ -205,6 +258,17 @@ export default {
       name: 'My Drawing Session',
       clearScene: true,
       commands: []
+    });
+    
+    // Custom coordinates parameters
+    const customCoordsParams = reactive({
+      name: 'My Custom Mesh',
+      color: '#ffffff',
+      useConvexHull: false,
+      coordinatesText: `0.0 0.0 0.0
+1.0 0.0 0.0
+0.5 1.0 0.0
+0.5 0.5 1.0`
     });
     
     const toggleDrawer = () => {
@@ -353,6 +417,74 @@ export default {
       }
     };
     
+    const drawCustomCoords = async () => {
+      const coordsLines = customCoordsParams.coordinatesText.split('\n');
+      const points = [];
+      
+      for (const line of coordsLines) {
+        const trimmedLine = line.trim();
+        if (trimmedLine.length === 0) continue;
+        
+        const parts = trimmedLine.split(/\s+/); // Split by any whitespace
+        if (parts.length !== 3) {
+          alert(`Invalid coordinate format at line: "${trimmedLine}". Expected format: "X Y Z"`);
+          return;
+        }
+        
+        const [x, y, z] = parts.map(Number);
+        if (isNaN(x) || isNaN(y) || isNaN(z)) {
+          alert(`Invalid numeric values at line: "${trimmedLine}"`);
+          return;
+        }
+        
+        points.push({ x, y, z });
+      }
+      
+      if (points.length < 3) {
+        alert(`Custom mesh requires at least 3 points, got ${points.length}`);
+        return;
+      }
+      
+      console.log('Sending coordinates to API:', {
+        points: points,
+        color: customCoordsParams.color,
+        name: customCoordsParams.name,
+        useConvexHull: customCoordsParams.useConvexHull
+      });
+      
+      isDrawing.value = true;
+      drawingResult.value = null;
+      
+      try {
+        const response = await api.drawCustomCoords(
+          points, 
+          customCoordsParams.color, 
+          customCoordsParams.name, 
+          customCoordsParams.useConvexHull
+        );
+        
+        console.log('API response:', response.data);
+        
+        drawingResult.value = {
+          success: true,
+          model: response.data.model
+        };
+        
+        emit('model-created', response.data.model);
+        showCustomCoordsDrawer.value = false;
+        
+      } catch (error) {
+        console.error('Custom mesh drawing error:', error);
+        console.error('Error response:', error.response?.data);
+        drawingResult.value = {
+          success: false,
+          error: error.response?.data?.error || error.message
+        };
+      } finally {
+        isDrawing.value = false;
+      }
+    };
+    
     const addModelToScene = (model) => {
       // This would trigger adding the model to the current scene
       emit('model-created', model);
@@ -363,10 +495,12 @@ export default {
       showDrawer,
       showLineDrawer,
       showAdvancedDrawer,
+      showCustomCoordsDrawer,
       isDrawing,
       drawingResult,
       lineParams,
       sessionParams,
+      customCoordsParams,
       toggleDrawer,
       drawPrimitive,
       addPoint,
@@ -376,6 +510,7 @@ export default {
       addLineCommand,
       removeCommand,
       executeDrawingSession,
+      drawCustomCoords,
       addModelToScene
     };
   }
@@ -482,7 +617,16 @@ export default {
   background-color: #5a32a3;
 }
 
-.line-drawing-form, .advanced-drawing-form {
+.custom-coords-btn {
+  background-color: #007bff;
+  color: white;
+}
+
+.custom-coords-btn:hover {
+  background-color: #0056b3;
+}
+
+.line-drawing-form, .advanced-drawing-form, .custom-coords-form {
   background-color: white;
   padding: 20px;
   border-radius: 6px;
@@ -532,6 +676,21 @@ export default {
   padding: 8px;
   background-color: #f9f9f9;
   border-radius: 4px;
+}
+
+.coordinates-textarea {
+  width: 100%;
+  padding: 8px;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  font-size: 14px;
+  resize: vertical;
+}
+
+.coordinates-help {
+  margin-top: 5px;
+  font-size: 12px;
+  color: #666;
 }
 
 .commands-section {

@@ -239,5 +239,28 @@ def parse_command_data(cmd_type: str, cmd_data: dict) -> dict:
             "height": cmd_data.get("height", 2.0)
         }
     
+    elif cmd_type == "custom_coords":
+        # Parse custom coordinates command
+        coordinates_text = cmd_data.get("coordinates_text", "")
+        color_data = cmd_data.get("color", {"r": 0.8, "g": 0.8, "b": 0.8, "a": 1.0})
+        
+        if isinstance(color_data, dict):
+            color = Color(
+                r=color_data.get("r", 0.8),
+                g=color_data.get("g", 0.8),
+                b=color_data.get("b", 0.8),
+                a=color_data.get("a", 1.0)
+            )
+        else:
+            # Handle hex color string
+            color = Color.from_hex(str(color_data))
+        
+        return {
+            "coordinates_text": coordinates_text,
+            "color": color,
+            "name": cmd_data.get("name", "CustomMesh"),
+            "use_convex_hull": cmd_data.get("use_convex_hull", True)
+        }
+    
     else:
         raise ValueError(f"Unknown command type: {cmd_type}")

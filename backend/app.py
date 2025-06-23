@@ -131,7 +131,7 @@ def scan_and_add_existing_files(folder_path: Path, extensions: set,
                         "id": str(uuid.uuid4()),
                         "name": display_name,
                         "description": f"{entry_type.title()} loaded from file: {original_name}",
-                        "format": file_path.suffix[1:].lower(),
+                        "format": file_path.suffix[1].lower(),
                         "category": "loaded",
                         "fileSize": file_stats.st_size,
                         "createdAt": datetime.fromtimestamp(file_stats.st_ctime).isoformat(),
@@ -626,6 +626,141 @@ def draw_primitive_endpoint():
         logger.error(f"Exception in primitive drawing: {e}", exc_info=True)
         return jsonify({"success": False, "error": str(e)}), 500
 
+@app.route('/api/draw/custom-coords', methods=['POST', 'OPTIONS'])
+def draw_custom_coords_endpoint():
+    """Create a custom mesh from coordinate text input"""
+    if request.method == 'OPTIONS':
+        return _build_cors_preflight_response()
+    
+    if not blender_service:
+        return jsonify({"success": False, "error": "Blender service not available"}), 503
+    
+    try:
+        data = request.get_json()
+        logger.info(f"Received custom coordinates request: {json.dumps(data, indent=2)}")
+        
+        coordinates_text = data.get('coordinates_text', '')
+        color = data.get('color', '#cccccc')
+        name = data.get('name', 'CustomMesh')
+        use_convex_hull = data.get('use_convex_hull', True)
+        
+        # Handle different coordinate input formats
+        if isinstance(coordinates_text, list):
+            # Frontend sent points as list of objects [{x, y, z}, ...]
+            points = coordinates_text
+            coordinates_text_str = '\n'.join([f"{float(p.get('x', 0))} {float(p.get('y', 0))} {float(p.get('z', 0))}" for p in points])
+            logger.info(f"Converted {len(points)} points from array to text format")
+        elif isinstance(coordinates_text, str):
+            coordinates_text_str = coordinates_text.strip()
+            if not coordinates_text_str:
+                return jsonify({"error": "Coordinates text is required"}), 400
+        else:
+            return jsonify({"error": "Invalid coordinates format"}), 400
+        
+        # Log the final coordinates text
+        logger.info(f"Final coordinates text:\n{coordinates_text_str}")
+        
+        # Validate coordinates format
+        lines = [line.strip() for line in coordinates_text_str.split('\n') if line.strip()]
+        if len(lines) < 3:
+            return jsonify({"error": f"At least 3 coordinate points are required, got {len(lines)}"}), 400
+        
+        # Validate each coordinate line and collect parsed points
+        parsed_points = []
+        for i, line in enumerate(lines):
+            parts = line.split()
+            if len(parts) != 3:
+                return jsonify({"error": f"Invalid coordinate format at line {i+1}: '{line}'. Expected 'X Y Z'"}), 400
+            try:
+                x, y, z = [float(x) for x in parts]
+                parsed_points.append((x, y, z))
+            except ValueError:
+                return jsonify({"error": f"Invalid numeric values at line {i+1}: '{line}'"}), 400
+        
+        logger.info(f"Successfully parsed {len(parsed_points)} coordinate points:")
+        for i, (x, y, z) in enumerate(parsed_points):
+            logger.info(f"  Point {i+1}: ({x}, {y}, {z})")
+        
+        logger.info(f"Creating custom mesh with convex_hull={use_convex_hull}")
+        
+        # Create session data using the correct command format
+        color_obj = blender_service._convert_hex_to_rgba(color)
+        
+        session_data = {
+            "session_id": str(uuid.uuid4()),
+            "clear_scene": True,
+            "commands": [
+                ("custom_coords", {
+                    "coordinates_text": coordinates_text_str,
+                    "color": color_obj,
+                    "name": name,
+                    "use_convex_hull": use_convex_hull
+                })
+            ],
+            "output_format": "obj",
+            "output_name": f"custom_mesh_{name.lower().replace(' ', '_')}"
+        }
+        
+        logger.info(f"Session data created: {json.dumps(session_data, indent=2)}")
+        
+        success, output_path, error = blender_service.execute_drawing_session(session_data)
+        
+        logger.info(f"Blender service result: success={success}, output_path={output_path}, error={error}")
+        
+        if success and output_path:
+            # Verify the output file exists and has content
+            if not os.path.exists(output_path):
+                logger.error(f"Output file does not exist: {output_path}")
+                return jsonify({"success": False, "error": "Generated file not found"}), 500
+            
+            # Check file size before copying
+            output_size = os.path.getsize(output_path)
+            logger.info(f"Generated file size: {output_size} bytes")
+            
+            if output_size < 100:
+                logger.warning(f"Generated file is very small ({output_size} bytes), reading content for debug:")
+                try:
+                    with open(output_path, 'r') as f:
+                        content = f.read()
+                    logger.warning(f"File content preview:\n{content}")
+                except Exception as e:
+                    logger.error(f"Failed to read generated file: {e}")
+            
+            # Copy to models directory
+            filename = os.path.basename(output_path)
+            dest_path = MODELS_FOLDER / filename
+            cleanup_generated_files(output_path, dest_path)
+            
+            # Get file stats and validate file was created properly
+            file_stats = dest_path.stat()
+            logger.info(f"Copied file size: {file_stats.st_size} bytes")
+            
+            # Create model entry
+            new_model = {
+                "id": str(uuid.uuid4()),
+                "name": name,
+                "description": f"Custom mesh from coordinates ({len(lines)} vertices, convex_hull={use_convex_hull})",
+                "modelUrl": f"/models/{filename}",
+                "format": "obj",
+                "category": "generated",
+                "fileSize": file_stats.st_size,
+                "createdAt": datetime.now().isoformat(),
+                "isGenerated": True
+            }
+            
+            models.append(new_model)
+            save_data_to_file(models, MODELS_DB_FILE, "models")
+            
+            logger.info(f"Successfully created custom mesh model: {new_model}")
+            return jsonify({"success": True, "model": new_model}), 201
+        else:
+            logger.error(f"Custom mesh creation failed: {error}")
+            return jsonify({"success": False, "error": error or "Failed to create custom mesh"}), 500
+            
+    except Exception as e:
+        logger.error(f"Exception in custom mesh creation: {e}", exc_info=True)
+        return jsonify({"success": False, "error": str(e)}), 500
+
 @app.route('/')
 def index():
     """Root endpoint to check if API is running"""
@@ -647,14 +782,7 @@ def index():
         }
     })
 
-# Remove these duplicate route handlers that are causing conflicts:
-# @app.route('/models/<path:filename>', methods=['OPTIONS'])
-# def options_model(filename):
-#     return _build_cors_preflight_response()
 
-# @app.route('/textures/<path:filename>', methods=['OPTIONS'])
-# def options_texture(filename):
-#     return _build_cors_preflight_response()
 
 # Add error handler for uncaught exceptions
 @app.errorhandler(Exception)
