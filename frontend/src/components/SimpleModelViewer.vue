@@ -298,6 +298,7 @@ import { ref, reactive, onMounted, onBeforeUnmount, watch, computed, provide } f
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { OBJLoader } from 'three/examples/jsm/loaders/OBJLoader.js';
+import { MTLLoader } from 'three/examples/jsm/loaders/MTLLoader.js'; // NEW: Import MTLLoader
 import api from '../services/api.js';
 import ModelAnalyzer from './ModelAnalyzer.vue';
 
@@ -948,7 +949,7 @@ export default {
       resetObjectScale();
     };
     
-    // Load a model (unified function)
+    // Load a model with MTL support (unified function)
     const loadModel = async (modelData) => {
       const modelPath = modelData.modelPath || modelData.modelUrl;
       
@@ -978,12 +979,62 @@ export default {
       }
       
       try {
-        const loader = new OBJLoader();
+        // FIXED: Proper MTL path handling to avoid double "models/" prefix
+        let mtlPath = modelPath.replace('.obj', '.mtl');
+        let materials = null;
+        
+        try {
+          // Try to load MTL file
+          const mtlLoader = new MTLLoader();
+          
+          // FIXED: Set the correct base path without duplicating 'models/'
+          // Extract just the filename from the full path
+          const filename = modelPath.split('/').pop();
+          const mtlFilename = filename.replace('.obj', '.mtl');
+          
+          // Set the base path to the root directory where models are served
+          mtlLoader.setPath('/');
+          
+          console.log(`Attempting to load MTL: /models/${mtlFilename}`);
+          
+          materials = await new Promise((resolve, reject) => {
+            mtlLoader.load(
+              `models/${mtlFilename}`, // FIXED: Correct path without double prefix
+              (mtl) => {
+                console.log(`Successfully loaded MTL file: /models/${mtlFilename}`);
+                mtl.preload();
+                resolve(mtl);
+              },
+              (xhr) => {
+                console.log(`MTL loading progress: ${(xhr.loaded / xhr.total) * 100}%`);
+              },
+              (error) => {
+                console.warn(`Failed to load MTL file: /models/${mtlFilename}`, error);
+                resolve(null); // Don't reject, just continue without MTL
+              }
+            );
+          });
+        } catch (mtlError) {
+          console.warn(`MTL loading error for ${modelData.id}:`, mtlError);
+          materials = null;
+        }
+        
+        // Load OBJ file
+        const objLoader = new OBJLoader();
+        
+        // Apply materials if MTL was loaded successfully
+        if (materials) {
+          objLoader.setMaterials(materials);
+          console.log(`Applied MTL materials to OBJ loader for ${modelData.id}`);
+        }
         
         const object = await new Promise((resolve, reject) => {
-          loader.load(
+          objLoader.load(
             modelPath,
-            (obj) => resolve(obj),
+            (obj) => {
+              console.log(`Successfully loaded OBJ: ${modelPath}`);
+              resolve(obj);
+            },
             (xhr) => {
               console.log(`${modelData.id}: ${(xhr.loaded / xhr.total) * 100}% loaded`);
             },
@@ -997,9 +1048,35 @@ export default {
         // Store model metadata
         object.userData.modelId = modelData.id;
         object.userData.modelName = modelData.name || `Model ${modelData.id}`;
+        object.userData.hasMTL = !!materials;
         
-        // Apply material/color if specified
-        if (modelData.color || modelData.material) {
+        // Log material information for debugging
+        let materialCount = 0;
+        object.traverse((child) => {
+          if (child.isMesh) {
+            materialCount++;
+            console.log(`Mesh material for ${modelData.id}:`, {
+              materialName: child.material.name,
+              color: child.material.color,
+              hasMap: !!child.material.map,
+              materialType: child.material.type
+            });
+            
+            // Enable shadows
+            child.castShadow = true;
+            child.receiveShadow = true;
+            
+            // Store original material for highlighting
+            originalMaterials.set(child, child.material);
+          }
+        });
+        
+        console.log(`Model ${modelData.id} loaded with ${materialCount} materials, MTL: ${!!materials}`);
+        
+        // Apply custom color/material ONLY if no MTL was loaded and custom properties are specified
+        if (!materials && (modelData.color || modelData.material)) {
+          console.log(`Applying custom material to ${modelData.id} (no MTL found)`);
+          
           const materialProps = {
             color: new THREE.Color(modelData.color || '#cccccc'),
             roughness: modelData.material?.roughness || 0.7,
@@ -1008,15 +1085,12 @@ export default {
             emissiveIntensity: modelData.material?.emissiveIntensity || 0.0
           };
           
-          const material = new THREE.MeshStandardMaterial(materialProps);
+          const customMaterial = new THREE.MeshStandardMaterial(materialProps);
           
           object.traverse((child) => {
             if (child.isMesh) {
-              child.material = material;
-              child.castShadow = true;
-              child.receiveShadow = true;
-              // Store original material for highlighting
-              originalMaterials.set(child, material);
+              child.material = customMaterial;
+              originalMaterials.set(child, customMaterial);
             }
           });
         }

@@ -231,6 +231,10 @@ def serve_file_with_mime(folder: Path, filename: str) -> any:
         extension = Path(filename).suffix[1:].lower()
         mime_type = Config.MIME_TYPES.get(extension, 'application/octet-stream')
         
+        # Log file serving for debugging
+        file_path = folder / filename
+        logger.info(f"Attempting to serve file: {file_path} (exists: {file_path.exists()})")
+        
         response = make_response(send_from_directory(str(folder), filename))
         response.headers['Content-Type'] = mime_type
         response.headers['Access-Control-Allow-Origin'] = '*'
@@ -238,6 +242,7 @@ def serve_file_with_mime(folder: Path, filename: str) -> any:
         response.headers['Access-Control-Allow-Headers'] = 'Content-Type'
         return response
     except FileNotFoundError:
+        logger.error(f"File not found when serving: {folder / filename}")
         return jsonify({"error": f"File {filename} not found"}), 404
     except Exception as e:
         logger.error(f"Error serving file {filename}: {e}")
@@ -312,6 +317,16 @@ def serve_model(filename):
     """Serves 3D model files with CORS support"""
     if request.method == 'OPTIONS':
         return _build_cors_preflight_response()
+    
+    # Log the requested filename for debugging
+    logger.info(f"Serving model file: {filename}")
+    
+    # Check if file exists before trying to serve
+    file_path = MODELS_FOLDER / filename
+    if not file_path.exists():
+        logger.error(f"Model file not found: {file_path}")
+        return jsonify({"error": f"File {filename} not found"}), 404
+    
     return serve_file_with_mime(MODELS_FOLDER, filename)
 
 @app.route('/textures/<path:filename>', methods=['GET', 'OPTIONS'])
