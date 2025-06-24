@@ -53,14 +53,17 @@ export default {
     
     // NEW: Handle model creation from drawing tools
     const handleModelCreated = (newModel) => {
-      // Calculate automatic position for the new model
+      // FIXED: Improved automatic positioning calculation
       const modelCount = selectedModels.value.length;
-      const spacing = 3;
+      const spacing = 4; // Increased spacing between models
       const gridSize = Math.ceil(Math.sqrt(modelCount + 1));
       
       const row = Math.floor(modelCount / gridSize);
       const col = modelCount % gridSize;
       const gridOffset = (gridSize - 1) * spacing / 2;
+      
+      // FIXED: Better initial scale for new models
+      const initialScale = 1.5; // Slightly larger initial scale
       
       // Position the new model in the grid
       const modelWithPosition = {
@@ -71,10 +74,12 @@ export default {
           row * spacing - gridOffset
         ],
         rotation: [0, 0, 0],
-        scale: [1, 1, 1]
+        scale: [initialScale, initialScale, initialScale] // FIXED: Apply better initial scale
       };
       
       selectedModels.value.push(modelWithPosition);
+      
+      console.log(`Added model ${newModel.id} at position:`, modelWithPosition.position, 'with scale:', initialScale);
     };
     
     const handleModelPositionChanged = (modelId, newPosition) => {
@@ -158,7 +163,7 @@ h1 {
 
 .scene-container {
   width: 100%;
-  height: 70vh;
+  height: 75vh; /* Increased from 60vh to give more space to the scene */
   border: 1px solid #ddd;
   border-radius: 8px;
   overflow: hidden;
@@ -184,5 +189,11 @@ h1 {
 
 .model-selector-container {
   width: 100%;
+  max-height: 20vh; /* Reduced from 35vh to make it more compact */
+  overflow-y: auto; /* Make it scrollable */
+  border: 1px solid #ddd;
+  border-radius: 8px;
+  background-color: white;
+  margin-top: 10px;
 }
 </style>

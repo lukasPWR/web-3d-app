@@ -6,6 +6,7 @@
         <p>Loading models...</p>
       </div>
       
+      <!-- FIXED: Scene controls should always be visible -->
       <div class="scene-controls">
         <button @click="resetCamera" class="control-button">Reset View</button>
         <button @click="toggleGrid" class="control-button">{{ showGrid ? 'Hide' : 'Show' }} Grid</button>
@@ -288,7 +289,7 @@
       </div>
     </div>
     
-    <!-- Model Analyzer - NEW -->
+    <!-- FIXED: Model Analyzer should be shown when NOT in edit mode -->
     <ModelAnalyzer v-if="!editMode" />
   </div>
 </template>
@@ -1204,6 +1205,19 @@ export default {
         // Remove all models if none to load
         loadedModels.forEach((model, modelId) => {
           scene.remove(model);
+          
+          // Remove vertex visualization
+          if (vertexPointClouds.has(modelId)) {
+            scene.remove(vertexPointClouds.get(modelId));
+            vertexPointClouds.delete(modelId);
+          }
+          
+          // Remove wireframe visualization  
+          if (wireframeObjects.has(modelId)) {
+            scene.remove(wireframeObjects.get(modelId));
+            wireframeObjects.delete(modelId);
+          }
+          
           loadedModels.delete(modelId);
         });
         return;
@@ -1217,6 +1231,19 @@ export default {
         if (!newModelIds.has(modelId)) {
           const model = loadedModels.get(modelId);
           scene.remove(model);
+          
+          // Remove vertex visualization
+          if (vertexPointClouds.has(modelId)) {
+            scene.remove(vertexPointClouds.get(modelId));
+            vertexPointClouds.delete(modelId);
+          }
+          
+          // Remove wireframe visualization
+          if (wireframeObjects.has(modelId)) {
+            scene.remove(wireframeObjects.get(modelId));
+            wireframeObjects.delete(modelId);
+          }
+          
           loadedModels.delete(modelId);
         }
       }
@@ -1232,11 +1259,11 @@ export default {
         }
       }
       
-      // Only adjust camera if we have models and it's the first load
-      if (loadedModels.size > 0 && currentModelIds.size === 0) {
+      // FIXED: Always fit camera when models change, with a proper delay
+      if (loadedModels.size > 0) {
         setTimeout(() => {
           fitCameraToModels();
-        }, 100);
+        }, 200); // Increased delay to ensure all models are properly loaded and positioned
       }
     };
 
@@ -1286,23 +1313,47 @@ export default {
       const size = new THREE.Vector3();
       boundingBox.getSize(size);
       
-      // Calculate distance to fit all models
+      // FIXED: Improved camera distance calculation
       const maxDim = Math.max(size.x, size.y, size.z);
+      
+      // Ensure minimum size for very small models
+      const effectiveSize = Math.max(maxDim, 2);
+      
       const fov = camera.fov * (Math.PI / 180);
-      let distance = maxDim / (2 * Math.tan(fov / 2));
+      let distance = effectiveSize / (2 * Math.tan(fov / 2));
       
-      // Add some padding
-      distance *= 1.5;
+      // FIXED: Better padding calculation based on model count and size
+      const modelCount = loadedModels.size;
+      const paddingMultiplier = Math.max(2.5, 1.5 + (modelCount * 0.3));
+      distance *= paddingMultiplier;
       
-      // Position camera to look at center of all models
-      const direction = new THREE.Vector3()
-        .subVectors(camera.position, controls.target)
-        .normalize()
-        .multiplyScalar(distance);
+      // FIXED: Ensure minimum distance for proper viewing
+      distance = Math.max(distance, effectiveSize * 3);
       
-      camera.position.copy(center).add(direction);
+      // FIXED: Better camera positioning - position camera at an angle for better view
+      const cameraOffset = new THREE.Vector3(
+        distance * 0.7, // X offset
+        distance * 0.5, // Y offset (height)
+        distance * 0.7  // Z offset
+      );
+      
+      camera.position.copy(center).add(cameraOffset);
       controls.target.copy(center);
+      
+      // FIXED: Update camera near/far planes based on scene size
+      camera.near = Math.max(0.1, distance / 1000);
+      camera.far = distance * 10;
+      camera.updateProjectionMatrix();
+      
       controls.update();
+      
+      console.log(`Camera fitted to ${modelCount} models:`, {
+        boundingBoxSize: size,
+        effectiveSize,
+        distance,
+        cameraPosition: camera.position,
+        targetPosition: controls.target
+      });
     };
     
     // Animation loop with proper tracking
@@ -1846,29 +1897,40 @@ export default {
 
 .scene-controls {
   position: absolute;
-  bottom: 10px;
-  left: 10px;
+  bottom: 15px; /* Moved up slightly from 10px */
+  left: 15px; /* Moved right slightly from 10px */
   display: flex;
   gap: 8px;
+  z-index: 1000; /* High z-index to ensure visibility */
+  flex-wrap: wrap; /* Allow wrapping on smaller screens */
+  max-width: calc(100% - 30px); /* Prevent overflow */
 }
 
 .control-button {
-  padding: 8px 12px;
-  background-color: rgba(0, 0, 0, 0.5);
+  padding: 10px 14px; /* Slightly larger padding for better visibility */
+  background-color: rgba(0, 0, 0, 0.8); /* More opaque for better visibility */
   color: white;
-  border: none;
-  border-radius: 4px;
+  border: 2px solid rgba(255, 255, 255, 0.3); /* Add border for definition */
+  border-radius: 6px; /* Slightly larger radius */
   cursor: pointer;
-  font-size: 14px;
-  transition: background-color 0.2s;
+  font-size: 13px; /* Slightly smaller font to fit better */
+  transition: all 0.3s;
+  font-weight: bold;
+  box-shadow: 0 3px 6px rgba(0, 0, 0, 0.4); /* Stronger shadow for visibility */
+  white-space: nowrap; /* Prevent text wrapping */
 }
 
 .control-button:hover {
-  background-color: rgba(0, 0, 0, 0.7);
+  background-color: rgba(0, 0, 0, 0.95);
+  border-color: rgba(255, 255, 255, 0.6);
+  transform: translateY(-2px); /* More pronounced lift on hover */
+  box-shadow: 0 5px 10px rgba(0, 0, 0, 0.5);
 }
 
 .control-button.active {
   background-color: #ff6b00;
+  border-color: #fff;
+  box-shadow: 0 0 15px rgba(255, 107, 0, 0.6); /* Stronger glow effect */
 }
 
 .mouse-controls-info {

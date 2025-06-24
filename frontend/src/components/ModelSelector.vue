@@ -33,7 +33,7 @@
       </div>
     </div>
     
-    <div v-if="selectedModels.length > 0" class="edit-mode-info">
+    <div class="edit-mode-info">
       <p><strong>💡 Tip:</strong> Use "Edit Mode" in the 3D viewer to move objects by clicking and using arrow controls!</p>
     </div>
   </div>
@@ -141,7 +141,8 @@ export default {
       error,
       isModelSelected,
       toggleModel,
-      removeModel
+      removeModel,
+      selectedModels: props.selectedModels
     };
   }
 };
@@ -149,12 +150,20 @@ export default {
 
 <style scoped>
 .model-selector {
-  margin-bottom: 1rem;
+  margin-bottom: 0.5rem; /* Reduced from 1rem */
+  height: 100%;
+  display: flex;
+  flex-direction: column;
 }
 
 h2 {
-  margin-bottom: 0.5rem;
-  font-size: 1.3rem;
+  margin-bottom: 0.3rem; /* Reduced from 0.5rem */
+  font-size: 1.1rem; /* Smaller title */
+  flex-shrink: 0;
+  padding: 0.5rem; /* Add padding to header */
+  background-color: #f8f9fa;
+  border-bottom: 1px solid #e0e0e0;
+  margin: 0; /* Remove margin */
 }
 
 .loading, .error {
@@ -171,28 +180,30 @@ h2 {
 
 .model-selection-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
-  gap: 0.5rem;
-  margin-bottom: 1rem;
-  max-height: 300px;
+  grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); /* Even smaller cards */
+  gap: 0.3rem; /* Smaller gap */
+  margin-bottom: 0;
+  flex: 1;
   overflow-y: auto;
   padding: 0.5rem;
-  border: 1px solid #e0e0e0;
-  border-radius: 6px;
-  background-color: #fafafa;
+  border: none; /* Remove border since container has it */
+  border-radius: 0;
+  background-color: transparent;
+  max-height: none;
 }
 
 .model-card {
   border: 1px solid #e0e0e0;
   border-radius: 4px;
-  padding: 0.5rem;
+  padding: 0.3rem; /* Even smaller padding */
   cursor: pointer;
   transition: all 0.2s ease;
   display: flex;
   flex-direction: column;
   justify-content: space-between;
-  height: 120px;
-  font-size: 0.85rem;
+  height: 95px; /* Smaller height */
+  font-size: 0.75rem; /* Smaller font */
+  background-color: white;
 }
 
 .model-card:hover {
@@ -214,16 +225,19 @@ h2 {
 
 .model-card h3 {
   margin: 0;
-  font-size: 0.9rem;
+  font-size: 0.8rem; /* Smaller title */
   color: #333;
-  line-height: 1.2;
+  line-height: 1.1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .model-format {
-  font-size: 0.7rem;
-  padding: 0.1rem 0.3rem;
+  font-size: 0.6rem; /* Smaller format tag */
+  padding: 0.05rem 0.2rem;
   background-color: #e0e0e0;
-  border-radius: 3px;
+  border-radius: 2px;
   color: #666;
 }
 
@@ -234,20 +248,20 @@ h2 {
 
 .model-description {
   color: #666;
-  font-size: 12px;
-  margin-top: 4px;
+  font-size: 10px; /* Smaller description */
+  margin-top: 2px;
   display: -webkit-box;
-  -webkit-line-clamp: 2;
-  line-clamp: 2;
+  -webkit-line-clamp: 1; /* Only 1 line instead of 2 */
+  line-clamp: 1;
   -webkit-box-orient: vertical;
   overflow: hidden;
   text-overflow: ellipsis;
-  line-height: 1.3;
+  line-height: 1.1;
 }
 
 .select-button {
   width: 100%;
-  padding: 0.3rem;
+  padding: 0.2rem; /* Smaller button padding */
   border: none;
   border-radius: 3px;
   background-color: #2196f3;
@@ -255,7 +269,7 @@ h2 {
   font-weight: bold;
   cursor: pointer;
   transition: background-color 0.2s;
-  font-size: 0.75rem;
+  font-size: 0.65rem; /* Smaller button text */
 }
 
 .select-button:hover {
@@ -274,13 +288,14 @@ h2 {
   background-color: #e3f2fd;
   border: 1px solid #2196f3;
   border-radius: 6px;
-  padding: 8px;
-  margin-bottom: 10px;
+  padding: 4px 8px; /* Smaller padding */
+  margin: 0.5rem; /* Add margin around */
+  flex-shrink: 0;
 }
 
 .edit-mode-info p {
   margin: 0;
   color: #1976d2;
-  font-size: 13px;
+  font-size: 11px; /* Smaller info text */
 }
 </style>
