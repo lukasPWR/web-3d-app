@@ -81,11 +81,12 @@
     <!-- Edit Mode Controls - Now as sidebar -->
     <div v-if="editMode" class="edit-sidebar">
       <div class="edit-controls">
-        <div class="selected-object-info">
-          <h4>{{ selectedObject ? `Selected: ${selectedObject.userData.modelName}` : 'No object selected' }}</h4>
-          <p v-if="!selectedObject">Click on a model to select it</p>
+        <!-- Selected object info -->
+        <div v-if="selectedObject" class="selected-object-info">
+          <h4>Selected Model</h4>
+          <p>{{ selectedObject.userData.modelName || 'Unnamed Model' }}</p>
         </div>
-        
+
         <div v-if="selectedObject" class="movement-controls">
           <div class="control-section">
             <h5>Position</h5>
@@ -286,6 +287,23 @@
             </button>
           </div>
         </div>
+        
+        <!-- Update Model button - NEW SECTION -->
+        <div class="control-section">
+          <h5>Save Changes</h5>
+          <div class="update-controls">
+            <button 
+              @click="updateModelChanges" 
+              class="update-btn" 
+              :disabled="isUpdating">
+              {{ isUpdating ? 'Updating...' : 'Update Model with Changes' }}
+            </button>
+            
+            <div v-if="updateStatus.show" :class="['update-status', updateStatus.type]">
+              {{ updateStatus.message }}
+            </div>
+          </div>
+        </div>
       </div>
     </div>
     
@@ -299,7 +317,8 @@ import { ref, reactive, onMounted, onBeforeUnmount, watch, computed, provide } f
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { OBJLoader } from 'three/examples/jsm/loaders/OBJLoader.js';
-import { MTLLoader } from 'three/examples/jsm/loaders/MTLLoader.js'; // NEW: Import MTLLoader
+import { MTLLoader } from 'three/examples/jsm/loaders/MTLLoader.js';
+import axios from 'axios'; // Make sure axios is imported
 import api from '../services/api.js';
 import ModelAnalyzer from './ModelAnalyzer.vue';
 
@@ -326,7 +345,7 @@ export default {
       required: false
     }
   },
-  emits: ['model-position-changed', 'model-rotation-changed', 'model-scale-changed', 'model-material-changed'],
+  emits: ['model-position-changed', 'model-rotation-changed', 'model-scale-changed', 'model-material-changed', 'model-updated'],
   setup(props, { emit }) {
     const container = ref(null);
     const isLoading = ref(true);
@@ -404,6 +423,14 @@ export default {
     // Store vertex point clouds for each model
     const vertexPointClouds = new Map();
     const wireframeObjects = new Map();
+    
+    // NEW: Add missing reactive variables
+    const isUpdating = ref(false);
+    const updateStatus = reactive({
+      show: false,
+      message: '',
+      type: 'info' // 'success', 'error', 'warning', 'info'
+    });
     
     // Initialize Three.js scene
     const initScene = () => {
@@ -1816,6 +1843,98 @@ export default {
       });
     };
 
+    // NEW: Helper to emit material changes
+    const emitMaterialChange = () => {
+      if (!selectedObject.value) return;
+      
+      const modelId = selectedObject.value.userData.modelId;
+      emit('model-material-changed', {
+        modelId,
+        material: {
+          color: selectedObjectMaterial.value.color,
+          roughness: selectedObjectMaterial.value.roughness,
+          metalness: selectedObjectMaterial.value.metalness,
+          emissive: selectedObjectMaterial.value.emissive,
+          emissiveIntensity: selectedObjectMaterial.value.emissiveIntensity,
+          textureId: selectedObjectMaterial.value.textureId
+        }
+      });
+    };
+    
+    // NEW: Update model changes
+    const updateModelChanges = async () => {
+      if (!selectedObject.value || !editMode.value) return;
+      
+      // Get model ID from selected object
+      const modelId = selectedObject.value.userData.modelId;
+      if (!modelId) {
+        showUpdateStatus('Error: Model ID not found', 'error');
+        return;
+      }
+      
+      // Collect current model parameters
+      const updateData = {
+        position: [
+          selectedObject.value.position.x,
+          selectedObject.value.position.y,
+          selectedObject.value.position.z
+        ],
+        rotation: [
+          selectedObject.value.rotation.x * (180/Math.PI), // Convert to degrees for API
+          selectedObject.value.rotation.y * (180/Math.PI),
+          selectedObject.value.rotation.z * (180/Math.PI)
+        ],
+        scale: [
+          selectedObject.value.scale.x,
+          selectedObject.value.scale.y,
+          selectedObject.value.scale.z
+        ],
+        material: {
+          color: selectedObjectMaterial.value.color,
+          roughness: selectedObjectMaterial.value.roughness,
+          metalness: selectedObjectMaterial.value.metalness,
+          emissive: selectedObjectMaterial.value.emissive,
+          emissiveIntensity: selectedObjectMaterial.value.emissiveIntensity
+        }
+      };
+      
+      isUpdating.value = true;
+      showUpdateStatus('Processing model update...', 'info');
+      
+      try {
+        const response = await axios.post(`/api/models/${modelId}/update`, updateData);
+        
+        if (response.data && response.data.updatedModel) {
+          showUpdateStatus('Model updated successfully!', 'success');
+          
+          // Emit event to parent component
+          emit('model-updated', {
+            originalModelId: modelId,
+            updatedModel: response.data.updatedModel
+          });
+        } else {
+          showUpdateStatus('Update completed with warnings', 'warning');
+        }
+      } catch (error) {
+        console.error('Error updating model:', error);
+        showUpdateStatus(`Update failed: ${error.response?.data?.error || error.message}`, 'error');
+      } finally {
+        isUpdating.value = false;
+        
+        // Hide status message after 5 seconds
+        setTimeout(() => {
+          updateStatus.show = false;
+        }, 5000);
+      }
+    };
+    
+    // NEW: Helper to show update status
+    const showUpdateStatus = (message, type) => {
+      updateStatus.show = true;
+      updateStatus.message = message;
+      updateStatus.type = type;
+    };
+    
     return {
       container,
       isLoading,
@@ -1850,7 +1969,10 @@ export default {
       vertexSettings,
       toggleVertexVisualization,
       toggleWireframe,
-      updateVertexVisualization
+      updateVertexVisualization,
+      updateModelChanges,
+      isUpdating,
+      updateStatus
     };
   }
 };
@@ -2001,9 +2123,6 @@ export default {
 }
 
 .control-section {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
   margin-bottom: 12px;
   padding-bottom: 8px;
   border-bottom: 1px solid #eee;
@@ -2015,24 +2134,22 @@ export default {
 }
 
 .control-section h5 {
-  margin: 0 0 6px 0;
-  color: #333;
+  margin: 0 0 8px 0;
   font-size: 12px;
   font-weight: bold;
   text-transform: uppercase;
   letter-spacing: 0.5px;
+  color: #333;
 }
 
 .axis-control {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 4px;
+  margin-bottom: 6px;
 }
 
 .axis-control label {
-  font-weight: bold;
-  color: #333;
   font-size: 11px;
   min-width: 35px;
 }
@@ -2047,18 +2164,15 @@ export default {
   height: 28px;
   border: 1px solid #ddd;
   background-color: white;
-  border-radius: 3px;
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 14px;
   transition: all 0.2s;
 }
 
 .direction-btn:hover {
   background-color: #f0f0f0;
-  border-color: #2196f3;
 }
 
 .direction-btn:active {
@@ -2069,7 +2183,6 @@ export default {
 .rotation-btn {
   background-color: #f8f9fa;
   border-color: #e3f2fd;
-  color: #1976d2;
 }
 
 .rotation-btn:hover {
@@ -2090,8 +2203,6 @@ export default {
 }
 
 .step-control label {
-  font-weight: bold;
-  color: #333;
   font-size: 11px;
 }
 
@@ -2275,16 +2386,75 @@ export default {
 }
 
 .vertex-color-picker {
-  width: 30px;
-  height: 20px;
-  border: none;
-  border-radius: 3px;
   cursor: pointer;
+  border-radius: 3px;
+  border: none;
+  height: 20px;
+  width: 30px;
 }
 
 .control-row span {
-  min-width: 30px;
-  font-size: 10px;
   text-align: right;
+  font-size: 10px;
+  min-width: 30px;
+}
+
+/* Update status styles */
+.update-controls {
+  margin-top: 15px;
+}
+
+.update-btn {
+  width: 100%;
+  padding: 10px;
+  background-color: #28a745;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: bold;
+  transition: background-color 0.3s;
+}
+
+.update-btn:hover {
+  background-color: #218838;
+}
+
+.update-btn:disabled {
+  background-color: #6c757d;
+  cursor: not-allowed;
+}
+
+.update-status {
+  margin-top: 8px;
+  padding: 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  text-align: center;
+}
+
+.update-status.success {
+  background-color: #d4edda;
+  color: #155724;
+  border: 1px solid #c3e6cb;
+}
+
+.update-status.error {
+  background-color: #f8d7da;
+  color: #721c24;
+  border: 1px solid #f5c6cb;
+}
+
+.update-status.warning {
+  background-color: #fff3cd;
+  color: #856404;
+  border: 1px solid #ffeaa7;
+}
+
+.update-status.info {
+  background-color: #d1ecf1;
+  color: #0c5460;
+  border: 1px solid #bee5eb;
 }
 </style>

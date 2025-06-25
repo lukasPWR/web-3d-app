@@ -776,6 +776,161 @@ def draw_custom_coords_endpoint():
         logger.error(f"Exception in custom mesh creation: {e}", exc_info=True)
         return jsonify({"success": False, "error": str(e)}), 500
 
+@app.route('/api/models/<model_id>/update', methods=['POST', 'OPTIONS'])
+def update_model(model_id):
+    """Updates a 3D model with new transforms and material properties"""
+    if request.method == 'OPTIONS':
+        return _build_cors_preflight_response()
+    
+    try:
+        # Check if BlenderDrawingService is available
+        if 'blender_service' not in globals():
+            return jsonify({"error": "Blender service not available"}), 500
+        
+        # Find the model
+        model = next((model for model in models if model["id"] == model_id), None)
+        if not model:
+            return jsonify({"error": "Model not found"}), 404
+        
+        # Get update data from request
+        update_data = request.get_json()
+        if not update_data:
+            return jsonify({"error": "No update data provided"}), 400
+        
+        logger.info(f"Updating model {model_id} with data: {json.dumps(update_data, indent=2)}")
+        
+        # Get original file path
+        original_filename = model["modelUrl"].split("/")[-1]
+        original_path = MODELS_FOLDER / original_filename
+        
+        # Check if original file exists
+        if not original_path.exists():
+            return jsonify({"error": "Original model file not found"}), 404
+        
+        # Prepare update specification for Blender
+        blender_update_spec = {}
+        
+        # Handle position/location
+        if "position" in update_data:
+            blender_update_spec["location"] = update_data["position"]
+        
+        # Handle rotation
+        if "rotation" in update_data:
+            blender_update_spec["rotation"] = update_data["rotation"]
+        
+        # Handle scale  
+        if "scale" in update_data:
+            blender_update_spec["scale"] = update_data["scale"]
+        
+        # Handle material properties
+        if "material" in update_data:
+            material_spec = {}
+            mat_data = update_data["material"]
+            
+            if "color" in mat_data:
+                # Convert hex color to RGB
+                color_hex = mat_data["color"]
+                if color_hex.startswith('#'):
+                    color_hex = color_hex[1:]
+                r = int(color_hex[0:2], 16) / 255.0
+                g = int(color_hex[2:4], 16) / 255.0
+                b = int(color_hex[4:6], 16) / 255.0
+                material_spec["color"] = [r, g, b, 1.0]
+            
+            if "roughness" in mat_data:
+                material_spec["roughness"] = float(mat_data["roughness"])
+            
+            if "metalness" in mat_data:
+                material_spec["metallic"] = float(mat_data["metalness"])
+            
+            if "emissive" in mat_data:
+                # Convert hex emissive color to RGB
+                emissive_hex = mat_data["emissive"]
+                if emissive_hex.startswith('#'):
+                    emissive_hex = emissive_hex[1:]
+                r = int(emissive_hex[0:2], 16) / 255.0
+                g = int(emissive_hex[2:4], 16) / 255.0
+                b = int(emissive_hex[4:6], 16) / 255.0
+                material_spec["emission"] = [r, g, b]
+            
+            if "emissiveIntensity" in mat_data:
+                material_spec["emissiveIntensity"] = float(mat_data["emissiveIntensity"])
+            
+            if material_spec:
+                blender_update_spec["material"] = material_spec
+        
+        # Generate output name
+        model_name = model.get("name", "updated_model")
+        safe_name = "".join(c for c in model_name if c.isalnum() or c in (' ', '-', '_')).rstrip()
+        safe_name = safe_name.replace(' ', '_')
+        output_name = f"{safe_name}_edited"
+        
+        logger.info(f"Blender update spec: {json.dumps(blender_update_spec, indent=2)}")
+        
+        # Execute update using Blender service
+        success, output_path, error = blender_service.update_model(
+            str(original_path), 
+            blender_update_spec,
+            output_name
+        )
+        
+        if not success:
+            logger.error(f"Failed to update model: {error}")
+            return jsonify({"error": f"Failed to update model: {error}"}), 500
+        
+        # Create new model entry for the updated version
+        output_path_obj = Path(output_path)
+        if not output_path_obj.exists():
+            return jsonify({"error": "Updated model file was not created"}), 500
+        
+        # Get file stats
+        file_stats = output_path_obj.stat()
+        
+        # Create new model entry
+        updated_model = {
+            "id": str(uuid.uuid4()),
+            "name": f"{model['name']} (Edited)",
+            "description": f"Edited version of {model['name']}",
+            "format": "obj",
+            "category": "edited",
+            "fileSize": file_stats.st_size,
+            "createdAt": datetime.now().isoformat(),
+            "modelUrl": f"/models/{output_path_obj.name}",
+            "thumbnailUrl": None,
+            "tags": model.get("tags", []) + ["edited"],
+            "isEdited": True,
+            "originalModelId": model_id
+        }
+        
+        # Copy updated files to models folder if they're not already there
+        models_output_dir = MODELS_FOLDER
+        final_obj_path = models_output_dir / output_path_obj.name
+        final_mtl_path = models_output_dir / output_path_obj.with_suffix('.mtl').name
+        
+        # Copy files if they're in a different location
+        if str(output_path_obj.parent) != str(models_output_dir):
+            shutil.copy2(str(output_path_obj), str(final_obj_path))
+            if output_path_obj.with_suffix('.mtl').exists():
+                shutil.copy2(str(output_path_obj.with_suffix('.mtl')), str(final_mtl_path))
+        
+        # Add to models list
+        models.append(updated_model)
+        save_data_to_file(models, MODELS_DB_FILE, "models")
+        
+        logger.info(f"Successfully updated model. New model ID: {updated_model['id']}")
+        
+        return jsonify({
+            "message": "Model updated successfully",
+            "updatedModel": updated_model,
+            "outputPath": str(final_obj_path)
+        }), 200
+        
+    except Exception as e:
+        logger.error(f"Error updating model: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": f"Failed to update model: {str(e)}"}), 500
+
 @app.route('/')
 def index():
     """Root endpoint to check if API is running"""

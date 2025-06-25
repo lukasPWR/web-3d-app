@@ -56,6 +56,13 @@ export default {
     return apiClient.delete(`/api/models/${id}`);
   },
 
+  updateModel(id, data) {
+    if (!id) {
+      return Promise.reject(new Error('Model ID is required'));
+    }
+    return apiClient.post(`/api/models/${id}/update`, data);
+  },
+
   // Texture related API calls
   getTextures() {
     return apiClient.get('/api/textures');

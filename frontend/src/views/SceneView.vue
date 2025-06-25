@@ -110,13 +110,42 @@ export default {
       }
     };
     
+    // Add handler for model updates
+    const handleModelUpdated = ({ originalModelId, updatedModel }) => {
+      console.log(`Model ${originalModelId} was updated. New model ID: ${updatedModel.id}`);
+      
+      // Find the original model
+      const originalModel = selectedModels.value.find(m => m.id === originalModelId);
+      if (originalModel) {
+        // Option 1: Replace the original model with updated one
+        // This preserves the position in the array
+        const index = selectedModels.value.indexOf(originalModel);
+        if (index !== -1) {
+          // Add the new model to the scene with the same position/rotation/scale
+          const modelWithPosition = {
+            ...updatedModel,
+            position: originalModel.position,
+            rotation: originalModel.rotation,
+            scale: originalModel.scale
+          };
+          
+          // Replace the model in the array
+          selectedModels.value.splice(index, 1, modelWithPosition);
+          console.log(`Replaced model at index ${index} with updated version`);
+        }
+      } else {
+        console.log(`Original model ${originalModelId} not found in selected models`);
+      }
+    };
+    
     return {
       selectedModels,
       handleModelCreated,
       handleModelPositionChanged,
       handleModelRotationChanged,
       handleModelScaleChanged,
-      handleModelMaterialChanged
+      handleModelMaterialChanged,
+      handleModelUpdated // Add the new handler to returned object
     };
   }
 };
