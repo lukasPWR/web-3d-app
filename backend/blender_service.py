@@ -575,18 +575,194 @@ def load_obj(filepath):
         bpy.context.view_layer.objects.active = obj
         obj.select_set(True)
         
+        # Log original vertex positions
+        logger.info("Original imported vertex positions:")
+        for i, vert in enumerate(obj.data.vertices[:8]):
+            logger.info(f"  Original Vertex {{i}}: {{vert.co[0]:.6f}}, {{vert.co[1]:.6f}}, {{vert.co[2]:.6f}}")
+        
         return obj
     else:
         logger.error("No objects were imported")
         return None
 
+def apply_updates(obj, spec):
+    """Apply updates to object using direct mesh vertex manipulation"""
+    logger.info(f"Applying updates to object: {{obj.name}}")
+    
+    # Make sure object is selected and active
+    bpy.context.view_layer.objects.active = obj
+    obj.select_set(True)
+    
+    # Reset object transforms to ensure clean state
+    obj.location = (0, 0, 0)
+    obj.rotation_euler = (0, 0, 0)
+    obj.scale = (1, 1, 1)
+    obj.rotation_mode = 'XYZ'
+    
+    # Force update
+    bpy.context.view_layer.update()
+    
+    # Apply transformations directly to mesh vertices
+    if any(key in spec for key in ["location", "rotation", "scale"]):
+        logger.info("Applying transformations directly to mesh vertices...")
+        
+        # Get mesh data
+        mesh = obj.data
+        
+        # Create transformation matrices
+        scale_matrix = Matrix.Identity(4)
+        rotation_matrix = Matrix.Identity(4)
+        translation_matrix = Matrix.Identity(4)
+        
+        # Build scale matrix
+        if "scale" in spec:
+            scale = spec["scale"]
+            scale_matrix = Matrix.Scale(scale[0], 4, (1, 0, 0)) @ Matrix.Scale(scale[1], 4, (0, 1, 0)) @ Matrix.Scale(scale[2], 4, (0, 0, 1))
+            logger.info(f"Scale matrix: {{scale}}")
+        
+        # Build rotation matrix
+        if "rotation" in spec:
+            rotation = spec["rotation"]
+            # Apply rotations in correct order: Z, Y, X (Euler XYZ)
+            euler = Euler((rotation[0], rotation[1], rotation[2]), 'XYZ')
+            rotation_matrix = euler.to_matrix().to_4x4()
+            logger.info(f"Rotation: {{[math.degrees(r) for r in rotation]}} degrees")
+        
+        # Build translation matrix
+        if "location" in spec:
+            location = spec["location"]
+            translation_matrix = Matrix.Translation((location[0], location[1], location[2]))
+            logger.info(f"Translation: {{location}}")
+        
+        # FIXED: Combine transformations in correct order: Scale -> Rotate -> Translate
+        # But apply them in reverse order to the vertex positions
+        transform_matrix = translation_matrix @ rotation_matrix @ scale_matrix
+        
+        logger.info("Applying transformations step by step to vertices...")
+        
+        # Apply transformations step by step for better control
+        temp_vertices = []
+        
+        # First collect all vertex positions
+        for vert in mesh.vertices:
+            temp_vertices.append(Vector((vert.co.x, vert.co.y, vert.co.z)))
+        
+        # Apply scale first
+        if "scale" in spec:
+            scale = spec["scale"]
+            for i, vert_co in enumerate(temp_vertices):
+                temp_vertices[i] = Vector((
+                    vert_co.x * scale[0],
+                    vert_co.y * scale[1], 
+                    vert_co.z * scale[2]
+                ))
+            logger.info(f"Applied scale: {{scale}}")
+        
+        # Apply rotation second
+        if "rotation" in spec:
+            rotation = spec["rotation"]
+            # Create rotation matrix
+            rot_x = Matrix.Rotation(rotation[0], 3, 'X').to_4x4()
+            rot_y = Matrix.Rotation(rotation[1], 3, 'Y').to_4x4()
+            rot_z = Matrix.Rotation(rotation[2], 3, 'Z').to_4x4()
+            
+            # Apply rotations in order: X, then Y, then Z
+            combined_rotation = rot_z @ rot_y @ rot_x
+            
+            for i, vert_co in enumerate(temp_vertices):
+                vert_co_4d = Vector((vert_co.x, vert_co.y, vert_co.z, 1.0))
+                rotated = combined_rotation @ vert_co_4d
+                temp_vertices[i] = Vector((rotated.x, rotated.y, rotated.z))
+            logger.info(f"Applied rotation: {{[math.degrees(r) for r in rotation]}} degrees")
+        
+        # Apply translation last
+        if "location" in spec:
+            location = spec["location"]
+            for i, vert_co in enumerate(temp_vertices):
+                temp_vertices[i] = Vector((
+                    vert_co.x + location[0],
+                    vert_co.y + location[1],
+                    vert_co.z + location[2]
+                ))
+            logger.info(f"Applied translation: {{location}}")
+        
+        # Now update the actual mesh vertices
+        for i, vert in enumerate(mesh.vertices):
+            vert.co = temp_vertices[i]
+    
+    # Handle material updates
+    if "material" in spec:
+        logger.info("Applying material updates...")
+        
+        # Get or create material
+        if obj.data.materials:
+            mat = obj.data.materials[0]
+        else:
+            mat = bpy.data.materials.new(name=f"{{obj.name}}_material")
+            obj.data.materials.append(mat)
+        
+        # Enable nodes for material
+        mat.use_nodes = True
+        nodes = mat.node_tree.nodes
+        links = mat.node_tree.links
+        
+        # Clear existing nodes
+        nodes.clear()
+        
+        # Create Principled BSDF
+        bsdf = nodes.new(type='ShaderNodeBsdfPrincipled')
+        
+        # Create Material Output
+        material_output = nodes.new(type='ShaderNodeOutputMaterial')
+        
+        # Link BSDF to output
+        links.new(bsdf.outputs['BSDF'], material_output.inputs['Surface'])
+        
+        material_spec = spec["material"]
+        
+        # Apply color
+        if "color" in material_spec:
+            color = material_spec["color"]
+            bsdf.inputs["Base Color"].default_value = (color[0], color[1], color[2], color[3])
+            # Also set legacy diffuse color for OBJ export
+            mat.diffuse_color = (color[0], color[1], color[2], color[3])
+            logger.info(f"Applied base color: {{color}}")
+        
+        # Apply roughness
+        if "roughness" in material_spec:
+            roughness = material_spec["roughness"]
+            bsdf.inputs["Roughness"].default_value = roughness
+            logger.info(f"Applied roughness: {{roughness}}")
+        
+        # Apply metallic
+        if "metallic" in material_spec:
+            metallic = material_spec["metallic"]
+            bsdf.inputs["Metallic"].default_value = metallic
+            logger.info(f"Applied metallic: {{metallic}}")
+        
+        # Apply emission
+        if "emission" in material_spec:
+            emission = material_spec["emission"]
+            if "Emission Color" in bsdf.inputs:
+                bsdf.inputs["Emission Color"].default_value = (emission[0], emission[1], emission[2], 1.0)
+            elif "Emission" in bsdf.inputs:
+                bsdf.inputs["Emission"].default_value = (emission[0], emission[1], emission[2], 1.0)
+            logger.info(f"Applied emission: {{emission}}")
+        
+        # Apply emission strength/intensity
+        if "emissiveIntensity" in material_spec:
+            intensity = material_spec["emissiveIntensity"]
+            if "Emission Strength" in bsdf.inputs:
+                bsdf.inputs["Emission Strength"].default_value = intensity
+            logger.info(f"Applied emission intensity: {{intensity}}")
+
 def export_obj(filepath):
-    """Export scene to OBJ by manually writing vertex data"""
-    logger.info(f"Manually exporting to OBJ: {{filepath}}")
+    """Export scene to OBJ using manual method for precise control"""
+    logger.info(f"Exporting to OBJ: {{filepath}}")
     # Ensure output directory exists
     os.makedirs(os.path.dirname(filepath), exist_ok=True)
     
-    # Get the first mesh object
+    # Get the mesh object
     mesh_obj = None
     for obj in bpy.context.scene.objects:
         if obj.type == 'MESH':
@@ -597,13 +773,12 @@ def export_obj(filepath):
         logger.error("No mesh object found for export")
         return
     
-    # Debug: Log vertex positions before manual export
-    logger.info(f"DEBUG: Manually exporting object {{mesh_obj.name}} vertices:")
+    # Log vertex positions before export
+    logger.info("Final vertex positions before export:")
     for i, vert in enumerate(mesh_obj.data.vertices[:8]):
-        v = vert.co
-        logger.info(f"  DEBUG Manual Vertex {{i}}: {{v[0]:.6f}}, {{v[1]:.6f}}, {{v[2]:.6f}}")
+        logger.info(f"  Export Vertex {{i}}: {{vert.co[0]:.6f}}, {{vert.co[1]:.6f}}, {{vert.co[2]:.6f}}")
     
-    # Manually write OBJ file using actual vertex coordinates from Blender
+    # Manual export to ensure correct vertex coordinates and faces
     try:
         with open(filepath, 'w') as f:
             # Write header
@@ -613,42 +788,59 @@ def export_obj(filepath):
             f.write(f"mtllib {{mtl_name}}\\n")
             f.write(f"o {{mesh_obj.name}}\\n")
             
-            # Write vertices using actual coordinates from mesh
+            # Write vertices using actual mesh coordinates
             for vert in mesh_obj.data.vertices:
                 v = vert.co
                 f.write(f"v {{v[0]:.6f}} {{v[1]:.6f}} {{v[2]:.6f}}\\n")
             
-            # Write normals if they exist
-            if mesh_obj.data.polygons:
-                for poly in mesh_obj.data.polygons:
-                    normal = poly.normal
+            # Calculate normals properly for Blender 4.4+
+            mesh_obj.data.calc_loop_triangles()
+            # Use calc_normals() instead of calc_normals_split() for Blender 4.4+
+            if hasattr(mesh_obj.data, 'calc_normals'):
+                mesh_obj.data.calc_normals()
+            
+            # Write normals for each polygon
+            written_normals = []
+            normal_index_map = {{}}
+            
+            for poly in mesh_obj.data.polygons:
+                normal = poly.normal
+                normal_key = (round(normal[0], 4), round(normal[1], 4), round(normal[2], 4))
+                
+                if normal_key not in normal_index_map:
+                    written_normals.append(normal)
+                    normal_index_map[normal_key] = len(written_normals)
                     f.write(f"vn {{normal[0]:.4f}} {{normal[1]:.4f}} {{normal[2]:.4f}}\\n")
             
             # Write material usage
             if mesh_obj.data.materials:
                 f.write(f"usemtl {{mesh_obj.data.materials[0].name}}\\n")
             
-            # Write faces
-            face_count = 0
-            for poly in mesh_obj.data.polygons:
+            # Write faces with proper indexing
+            logger.info(f"Writing {{len(mesh_obj.data.polygons)}} faces...")
+            
+            for poly_idx, poly in enumerate(mesh_obj.data.polygons):
                 if len(poly.vertices) >= 3:
-                    face_count += 1
-                    if face_count <= len(mesh_obj.data.polygons):
-                        f.write(f"s {{face_count}}\\n")
+                    # Write smooth group
+                    f.write(f"s {{poly_idx + 1}}\\n")
                     
-                    # Write face with vertex and normal indices
+                    # Get normal index for this polygon
+                    normal = poly.normal
+                    normal_key = (round(normal[0], 4), round(normal[1], 4), round(normal[2], 4))
+                    normal_idx = normal_index_map[normal_key]
+                    
+                    # Write face with vertex and normal indices (OBJ uses 1-based indexing)
                     face_line = "f"
                     for vert_idx in poly.vertices:
-                        # OBJ uses 1-based indexing
-                        face_line += f" {{vert_idx + 1}}//"
-                        # Use the polygon's normal index (1-based)
-                        face_line += f"{{poly.index + 1}}"
+                        face_line += f" {{vert_idx + 1}}//{{normal_idx}}"
                     face_line += "\\n"
                     f.write(face_line)
+            
+            logger.info(f"Exported {{len(mesh_obj.data.vertices)}} vertices and {{len(mesh_obj.data.polygons)}} faces")
         
         logger.info(f"Manual OBJ export successful: {{filepath}}")
         
-        # Create enhanced MTL file with texture support
+        # Create MTL file
         mtl_path = filepath.replace('.obj', '.mtl')
         with open(mtl_path, 'w') as f:
             f.write("# Blender 4.4.3 MTL File\\n")
@@ -657,103 +849,24 @@ def export_obj(filepath):
             if mesh_obj.data.materials:
                 for mat in mesh_obj.data.materials:
                     f.write(f"newmtl {{mat.name}}\\n")
+                    f.write("Ns 90.000000\\n")
+                    f.write("Ka 0.100000 0.100000 0.100000\\n")
+                    f.write("Ni 1.500000\\n")
+                    f.write("d 1.000000\\n")
+                    f.write("illum 3\\n")
                     
-                    # Default material properties
-                    f.write("Ns 90.000000\\n")  # Shininess
-                    f.write("Ka 0.100000 0.100000 0.100000\\n")  # Ambient
-                    f.write("Ni 1.500000\\n")  # Optical density
-                    f.write("d 1.000000\\n")   # Dissolve/Transparency
-                    f.write("illum 3\\n")      # Illumination model
-                    
-                    # Try to get material properties from Principled BSDF
-                    if mat.use_nodes and mat.node_tree:
-                        bsdf_node = None
-                        texture_node = None
-                        
-                        # Find BSDF and texture nodes
-                        for node in mat.node_tree.nodes:
-                            if node.type == 'BSDF_PRINCIPLED':
-                                bsdf_node = node
-                            elif node.type == 'TEX_IMAGE' and node.image:
-                                texture_node = node
-                        
-                        if bsdf_node:
-                            # Get base color (diffuse)
-                            if "Base Color" in bsdf_node.inputs:
-                                color = bsdf_node.inputs["Base Color"].default_value
-                                f.write(f"Kd {{color[0]:.6f}} {{color[1]:.6f}} {{color[2]:.6f}}\\n")
-                            
-                            # Get specular properties
-                            if "Metallic" in bsdf_node.inputs:
-                                metallic = bsdf_node.inputs["Metallic"].default_value
-                                specular = 0.5 + (metallic * 0.5)  # Convert metallic to specular
-                                f.write(f"Ks {{specular:.6f}} {{specular:.6f}} {{specular:.6f}}\\n")
-                            
-                            # Get emission
-                            emission_input = None
-                            if "Emission Color" in bsdf_node.inputs:
-                                emission_input = bsdf_node.inputs["Emission Color"]
-                            elif "Emission" in bsdf_node.inputs:
-                                emission_input = bsdf_node.inputs["Emission"]
-                            
-                            if emission_input:
-                                emission = emission_input.default_value
-                                f.write(f"Ke {{emission[0]:.6f}} {{emission[1]:.6f}} {{emission[2]:.6f}}\\n")
-                        
-                        # Handle texture mapping
-                        if texture_node and texture_node.image:
-                            image_name = texture_node.image.name
-                            
-                            # Try to find the actual texture file path
-                            texture_file_path = None
-                            
-                            # Check if image has filepath
-                            if hasattr(texture_node.image, 'filepath') and texture_node.image.filepath:
-                                texture_file_path = os.path.basename(texture_node.image.filepath)
-                            else:
-                                # Use image name as fallback
-                                texture_file_path = image_name
-                            
-                            # Ensure proper file extension
-                            if not any(texture_file_path.lower().endswith(ext) for ext in ['.jpg', '.jpeg', '.png', '.bmp', '.tga', '.tiff']):
-                                # If no extension, try to guess from image format
-                                if hasattr(texture_node.image, 'file_format'):
-                                    if texture_node.image.file_format == 'JPEG':
-                                        texture_file_path += '.jpg'
-                                    elif texture_node.image.file_format == 'PNG':
-                                        texture_file_path += '.png'
-                                    else:
-                                        texture_file_path += '.jpg'  # Default fallback
-                                else:
-                                    texture_file_path += '.jpg'  # Default fallback
-                            
-                            # Write texture map reference
-                            f.write(f"map_Kd {{texture_file_path}}\\n")
-                            
-                            logger.info(f"Added texture reference to MTL: {{texture_file_path}}")
-                            
-                            # Optional: Add other texture maps if available
-                            # Check if the same texture is used for other properties
-                            for link in mat.node_tree.links:
-                                if link.from_node == texture_node:
-                                    input_name = link.to_socket.name
-                                    
-                                    # Map Blender input names to MTL map types
-                                    if input_name == "Roughness":
-                                        f.write(f"map_Pr {{texture_file_path}}\\n")  # Roughness map
-                                    elif input_name == "Metallic":
-                                        f.write(f"map_Pm {{texture_file_path}}\\n")  # Metallic map
-                                    elif input_name == "Normal":
-                                        f.write(f"map_Bump {{texture_file_path}}\\n")  # Normal/bump map
+                    # Set diffuse color
+                    if hasattr(mat, 'diffuse_color'):
+                        color = mat.diffuse_color
+                        f.write(f"Kd {{color[0]:.6f}} {{color[1]:.6f}} {{color[2]:.6f}}\\n")
                     else:
-                        # No nodes - use default material
                         f.write("Kd 0.800000 0.800000 0.800000\\n")
-                        f.write("Ks 0.500000 0.500000 0.500000\\n")
-                        f.write("Ke 0.000000 0.000000 0.000000\\n")
                     
-                    f.write("\\n")  # Empty line between materials
+                    f.write("Ks 0.500000 0.500000 0.500000\\n")
+                    f.write("Ke 0.000000 0.000000 0.000000\\n")
+                    f.write("\\n")
             else:
-                # No materials - create default
+                # Create default material
                 f.write("newmtl DefaultMaterial\\n")
                 f.write("Ns 90.000000\\n")
                 f.write("Ka 0.100000 0.100000 0.100000\\n")
@@ -765,353 +878,43 @@ def export_obj(filepath):
                 f.write("illum 3\\n")
         
         logger.info(f"MTL file created: {{mtl_path}}")
-        
-        # DEBUG: Read and verify what we actually wrote
-        with open(filepath, 'r') as f:
-            lines = f.readlines()
-        vertex_lines = [line for line in lines if line.startswith('v ')][:8]
-        logger.info("DEBUG: Manually written vertex lines:")
-        for i, line in enumerate(vertex_lines):
-            logger.info(f"  DEBUG Manual Export {{i}}: {{line.strip()}}")
             
     except Exception as e:
         logger.error(f"Manual OBJ export failed: {{e}}")
         import traceback
         traceback.print_exc()
-
-def apply_updates(obj, spec):
-    """Apply updates to object based on specification"""
-    logger.info(f"Applying updates to object: {{obj.name}}")
-    
-    # Make sure object is selected and active
-    bpy.context.view_layer.objects.active = obj
-    obj.select_set(True)
-    
-    # Reset object transforms to identity first
-    obj.location = (0, 0, 0)
-    obj.rotation_euler = (0, 0, 0)
-    obj.scale = (1, 1, 1)
-    obj.rotation_mode = 'XYZ'
-    
-    # Force update
-    bpy.context.view_layer.update()
-    
-    # Create transformation matrix from spec
-    matrix = Matrix.Identity(4)
-    
-    # Apply scale first
-    if "scale" in spec:
-        scale = spec["scale"]
-        scale_matrix = Matrix.Diagonal((float(scale[0]), float(scale[1]), float(scale[2]), 1.0))
-        matrix = matrix @ scale_matrix
-        logger.info(f"Added scale to matrix: {{scale}}")
-    
-    # Apply rotation second
-    if "rotation" in spec:
-        rotation = spec["rotation"]
-        euler = Euler((float(rotation[0]), float(rotation[1]), float(rotation[2])), 'XYZ')
-        rotation_matrix = euler.to_matrix().to_4x4()
-        matrix = matrix @ rotation_matrix
-        logger.info(f"Added rotation to matrix (radians): {{rotation}}")
-        logger.info(f"Rotation (degrees): {{[math.degrees(r) for r in rotation]}}")
-    
-    # Apply translation last
-    if "location" in spec:
-        location = spec["location"]
-        translation_matrix = Matrix.Translation((float(location[0]), float(location[1]), float(location[2])))
-        matrix = matrix @ translation_matrix
-        logger.info(f"Added location to matrix: {{location}}")
-    
-    # Apply transformation matrix to mesh vertices directly
-    if any(key in spec for key in ["location", "rotation", "scale"]):
-        logger.info("Applying transformation matrix to mesh vertices...")
         
-        # Enter edit mode
-        bpy.ops.object.mode_set(mode='EDIT')
-        
-        # Get bmesh representation
-        bm = bmesh.from_edit_mesh(obj.data)
-        
-        # Transform all vertices
-        for vert in bm.verts:
-            # Convert vertex coordinate to 4D vector
-            co_4d = Vector((*vert.co, 1.0))
-            # Apply transformation matrix
-            new_co_4d = matrix @ co_4d
-            # Convert back to 3D and assign
-            vert.co = new_co_4d.xyz
-        
-        # Ensure indices are valid and update mesh
-        bm.verts.ensure_lookup_table()
-        bm.edges.ensure_lookup_table()
-        bm.faces.ensure_lookup_table()
-        
-        # Update mesh
-        bmesh.update_edit_mesh(obj.data)
-        
-        # Exit edit mode
-        bpy.ops.object.mode_set(mode='OBJECT')
-        
-        # CRITICAL: Apply all transforms to make them permanent in mesh data
-        logger.info("Applying all transforms to bake changes into mesh...")
-        bpy.ops.object.transform_apply(location=True, rotation=True, scale=True)
-        
-        # Force update of mesh data
-        obj.data.update()
-        
-        # CRITICAL: Reset object transforms to identity after baking
-        obj.location = (0, 0, 0)
-        obj.rotation_euler = (0, 0, 0)
-        obj.scale = (1, 1, 1)
-        
-        logger.info("Transformation matrix applied to vertices and baked into mesh")
-        
-        # Log vertex positions after transformation for debugging
-        logger.info(f"Total vertices: {{len(obj.data.vertices)}}")
-        if len(obj.data.vertices) > 0:
-            v0 = obj.data.vertices[0].co
-            logger.info(f"Vertex 0 after transform: {{v0[0]:.6f}}, {{v0[1]:.6f}}, {{v0[2]:.6f}}")
-            if len(obj.data.vertices) > 4:
-                v4 = obj.data.vertices[4].co
-                logger.info(f"Vertex 4 after transform: {{v4[0]:.6f}}, {{v4[1]:.6f}}, {{v4[2]:.6f}}")
-            if len(obj.data.vertices) > 7:
-                v7 = obj.data.vertices[7].co
-                logger.info(f"Vertex 7 after transform: {{v7[0]:.6f}}, {{v7[1]:.6f}}, {{v7[2]:.6f}}")
-    
-    # Force final update of all data
-    bpy.context.view_layer.update()
-    obj.data.update()
-    
-    # Verify vertices are actually transformed before export
-    logger.info("Final vertex verification before export:")
-    for i in range(min(len(obj.data.vertices), 8)):
-        v = obj.data.vertices[i].co
-        logger.info(f"  Vertex {{i}}: {{v[0]:.6f}}, {{v[1]:.6f}}, {{v[2]:.6f}}")
-
-    # MATERIAL
-    mat_spec = spec.get("material")
-    if mat_spec is not None:
-        logger.info(f"Updating material: {{mat_spec}}")
-        # Get or create material
-        if obj.data.materials:
-            mat = obj.data.materials[0]
-            logger.info(f"Using existing material: {{mat.name}}")
-        else:
-            mat = bpy.data.materials.new(obj.name + "_mat")
-            obj.data.materials.append(mat)
-            logger.info(f"Created new material: {{mat.name}}")
-        
-        # Ensure material uses nodes
-        mat.use_nodes = True
-        nodes = mat.node_tree.nodes
-        
-        # Clear existing nodes and create a clean setup
-        nodes.clear()
-        
-        # Create Principled BSDF node
-        bsdf = nodes.new(type='ShaderNodeBsdfPrincipled')
-        bsdf.location = (0, 0)
-        
-        # Create Material Output node
-        output = nodes.new(type='ShaderNodeOutputMaterial')
-        output.location = (300, 0)
-        
-        # Link Principled BSDF to Material Output
-        links = mat.node_tree.links
-        links.new(bsdf.outputs['BSDF'], output.inputs['Surface'])
-        
-        logger.info(f"Created clean material node setup with Principled BSDF")
-        
-        # Apply material properties
-        if "color" in mat_spec:
-            col = mat_spec["color"]
-            bsdf.inputs["Base Color"].default_value = (
-                float(col[0]), float(col[1]), float(col[2]), float(col[3])
+        # Try fallback using standard Blender export
+        logger.info("Attempting fallback export using standard Blender exporter...")
+        try:
+            # Select and make active
+            bpy.ops.object.select_all(action='DESELECT')
+            mesh_obj.select_set(True)
+            bpy.context.view_layer.objects.active = mesh_obj
+            
+            # Use Blender's built-in exporter as fallback
+            bpy.ops.wm.obj_export(
+                filepath=filepath,
+                export_selected_objects=True,
+                export_materials=True,
+                export_uv=True,
+                export_normals=True,
+                path_mode='COPY'
             )
-            logger.info(f"Updated color: {{col}}")
-        
-        if "roughness" in mat_spec:
-            roughness = float(mat_spec["roughness"])
-            bsdf.inputs["Roughness"].default_value = roughness
-            logger.info(f"Updated roughness: {{roughness}}")
-        
-        if "metallic" in mat_spec:
-            metallic = float(mat_spec["metallic"])
-            bsdf.inputs["Metallic"].default_value = metallic
-            logger.info(f"Updated metallic: {{metallic}}")
-        
-        if "emission" in mat_spec:
-            em = mat_spec["emission"]
-            emission_color = (float(em[0]), float(em[1]), float(em[2]), 1.0)
-            
-            # Handle emission intensity if provided
-            if "emissiveIntensity" in mat_spec:
-                intensity = float(mat_spec["emissiveIntensity"])
-                emission_color = (
-                    emission_color[0] * intensity,
-                    emission_color[1] * intensity,
-                    emission_color[2] * intensity,
-                    1.0
-                )
-                logger.info(f"Applied emission intensity: {{intensity}}")
-            
-            # Try both "Emission Color" (Blender 4.0+) and "Emission" (older versions)
-            emission_input = None
-            if "Emission Color" in bsdf.inputs:
-                emission_input = bsdf.inputs["Emission Color"]
-                logger.info("Using 'Emission Color' input (Blender 4.0+)")
-            elif "Emission" in bsdf.inputs:
-                emission_input = bsdf.inputs["Emission"]
-                logger.info("Using 'Emission' input (older Blender)")
-            
-            if emission_input:
-                emission_input.default_value = emission_color
-                logger.info(f"Updated emission: {{emission_color}}")
-            else:
-                logger.warning("No emission input found in Principled BSDF")
-                # List available inputs for debugging
-                available_inputs = [inp.name for inp in bsdf.inputs]
-                logger.info(f"Available BSDF inputs: {{available_inputs}}")
-
-        # NEW: Handle texture application in Blender
-        if "textureId" in mat_spec and mat_spec["textureId"]:
-            try:
-                texture_id = mat_spec["textureId"]
-                texture_scale = mat_spec.get("textureScale", 1.0)
-                
-                logger.info(f"Looking for texture with ID: {{texture_id}}")
-                
-                # Try to find texture file in static/textures directory
-                import glob
-                import shutil
-                
-                # FIXED: Improve texture file search paths
-                # Get absolute paths to backend directories
-                script_dir = Path(__file__).parent  # This should be the backend directory
-                
-                # Multiple search locations for texture files
-                texture_search_paths = [
-                    # Current backend static/textures
-                    script_dir / "static" / "textures",
-                    # Parent directory static/textures  
-                    script_dir.parent / "static" / "textures",
-                    # Relative paths from script execution
-                    Path("static") / "textures",
-                    Path("..") / "static" / "textures",
-                    Path("backend") / "static" / "textures"
-                ]
-                
-                logger.info(f"Searching for texture in paths: {{[str(p) for p in texture_search_paths]}}")
-                
-                texture_path = None
-                texture_filename = None
-                
-                # Search in all possible locations
-                for search_path in texture_search_paths:
-                    if search_path.exists():
-                        logger.info(f"Checking directory: {{search_path}}")
-                        # List all files in the directory for debugging
-                        try:
-                            files_in_dir = list(search_path.glob("*"))
-                            logger.info(f"Files in {{search_path}}: {{[f.name for f in files_in_dir[:10]]}}")  # Show first 10 files
-                        except Exception as e:
-                            logger.warning(f"Could not list files in {{search_path}}: {{e}}")
-                        
-                        # Search for files containing the texture ID
-                        pattern = f"*{{texture_id}}*"
-                        matches = list(search_path.glob(pattern))
-                        
-                        if matches:
-                            texture_path = str(matches[0])
-                            texture_filename = matches[0].name
-                            logger.info(f"Found texture file: {{texture_path}}")
-                            break
-                        else:
-                            logger.info(f"No match for pattern '{{pattern}}' in {{search_path}}")
-                
-                if not texture_path:
-                    # Last resort: try direct glob patterns
-                    direct_patterns = [
-                        f"static/textures/*{{texture_id}}*",
-                        f"../static/textures/*{{texture_id}}*", 
-                        f"backend/static/textures/*{{texture_id}}*",
-                        f"**/*{{texture_id}}*"  # Recursive search
-                    ]
-                    
-                    for pattern in direct_patterns:
-                        matches = glob.glob(pattern, recursive=True)
-                        if matches:
-                            texture_path = matches[0]
-                            texture_filename = os.path.basename(texture_path)
-                            logger.info(f"Found texture via glob: {{texture_path}}")
-                            break
-                
-                if texture_path and os.path.exists(texture_path):
-                    logger.info(f"Loading texture: {{texture_path}}")
-                    
-                    # Load texture in Blender
-                    image = bpy.data.images.load(texture_path)
-                    
-                    # Set the image name to just the filename for MTL export
-                    if not texture_filename:
-                        texture_filename = os.path.basename(texture_path)
-                    image.name = texture_filename
-                    
-                    # Create texture node
-                    texture_node = nodes.new(type='ShaderNodeTexImage')
-                    texture_node.image = image
-                    texture_node.location = (-300, 0)
-                    
-                    # Create UV mapping node
-                    uv_map_node = nodes.new(type='ShaderNodeUVMap')
-                    uv_map_node.location = (-500, 0)
-                    
-                    # Create mapping node for texture scaling
-                    mapping_node = nodes.new(type='ShaderNodeMapping')
-                    mapping_node.location = (-400, 0)
-                    mapping_node.inputs['Scale'].default_value = (texture_scale, texture_scale, texture_scale)
-                    
-                    # Link nodes: UV Map -> Mapping -> Texture -> BSDF
-                    links.new(uv_map_node.outputs['UV'], mapping_node.inputs['Vector'])
-                    links.new(mapping_node.outputs['Vector'], texture_node.inputs['Vector'])
-                    links.new(texture_node.outputs['Color'], bsdf.inputs['Base Color'])
-                    
-                    # IMPORTANT: Copy texture file to output directory for MTL reference
-                    output_dir = os.path.dirname(args.output)
-                    texture_output_path = os.path.join(output_dir, texture_filename)
-                    
-                    try:
-                        if not os.path.exists(texture_output_path):
-                            shutil.copy2(texture_path, texture_output_path)
-                            logger.info(f"Copied texture file to: {{texture_output_path}}")
-                        else:
-                            logger.info(f"Texture file already exists at: {{texture_output_path}}")
-                    except Exception as copy_error:
-                        logger.warning(f"Failed to copy texture file: {{copy_error}}")
-                    
-                    logger.info(f"Successfully applied texture: {{texture_path}} with scale {{texture_scale}}")
-                else:
-                    logger.warning(f"Texture file not found for ID: {{texture_id}}")
-                    logger.warning("Available search paths were:")
-                    for path in texture_search_paths:
-                        exists_status = "EXISTS" if path.exists() else "NOT FOUND"
-                        logger.warning(f"  {{path}} - {{exists_status}}")
-                    
-            except Exception as e:
-                logger.error(f"Failed to apply texture: {{e}}")
-                import traceback
-                traceback.print_exc()
+            logger.info(f"Fallback OBJ export successful: {{filepath}}")
+        except Exception as fallback_error:
+            logger.error(f"Fallback export also failed: {{fallback_error}}")
 
 def main():
     try:
-        # Parse arguments
         args = parse_args()
-        logger.info(f"Input args: {{args}}")
+        logger.info(f"Update script args: {{args}}")
         
         # Load update specification
         with open(args.input, 'r') as f:
             spec = json.load(f)
-        logger.info(f"Update spec loaded: {{spec}}")
+        
+        logger.info(f"Update specification: {{spec}}")
         
         # Import OBJ file
         obj = load_obj(args.obj)
@@ -1119,28 +922,20 @@ def main():
             logger.error("Failed to load OBJ file")
             sys.exit(1)
         
-        # Get the object name from spec or use imported name
-        obj_name = spec.get("object", obj.name)
-        
-        # Rename object if specified in spec
-        if obj.name != obj_name and obj_name:
-            obj.name = obj_name
-            logger.info(f"Renamed object to: {{obj_name}}")
-        
         # Apply updates
         apply_updates(obj, spec)
         
         # Export updated OBJ
         export_obj(args.output)
         
-        logger.info("Model update completed successfully")
-    
+        logger.info("Update script completed successfully")
+        
     except Exception as e:
-        logger.error(f"Error during model update: {{e}}")
+        logger.error(f"Update script failed: {{e}}")
         import traceback
         traceback.print_exc()
         sys.exit(1)
 
 if __name__ == "__main__":
     main()
-    '''
+'''
