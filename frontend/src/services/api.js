@@ -63,7 +63,6 @@ export default {
     return apiClient.post(`/api/models/${id}/update`, data);
   },
 
-  // Texture related API calls
   getTextures() {
     return apiClient.get('/api/textures');
   },

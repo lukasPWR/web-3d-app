@@ -444,6 +444,13 @@ logger.info("Blender execution script completed")
                     if "emissiveIntensity" in mat:
                         material_spec["emissiveIntensity"] = float(mat["emissiveIntensity"])
                     
+                    # NEW: Handle texture information
+                    if "textureId" in mat and mat["textureId"]:
+                        material_spec["textureId"] = str(mat["textureId"])
+                        
+                    if "textureScale" in mat:
+                        material_spec["textureScale"] = float(mat["textureScale"])
+                    
                     if material_spec:
                         blender_updates["material"] = material_spec
                 
@@ -641,27 +648,121 @@ def export_obj(filepath):
         
         logger.info(f"Manual OBJ export successful: {{filepath}}")
         
-        # Create a basic MTL file
+        # Create enhanced MTL file with texture support
         mtl_path = filepath.replace('.obj', '.mtl')
         with open(mtl_path, 'w') as f:
+            f.write("# Blender 4.4.3 MTL File\\n")
+            f.write("# www.blender.org\\n\\n")
+            
             if mesh_obj.data.materials:
-                mat = mesh_obj.data.materials[0]
-                f.write(f"newmtl {{mat.name}}\\n")
-                
-                # Try to get material properties from Principled BSDF
-                if mat.use_nodes and mat.node_tree:
-                    for node in mat.node_tree.nodes:
-                        if node.type == 'BSDF_PRINCIPLED':
-                            # Get base color
-                            if "Base Color" in node.inputs:
-                                color = node.inputs["Base Color"].default_value
+                for mat in mesh_obj.data.materials:
+                    f.write(f"newmtl {{mat.name}}\\n")
+                    
+                    # Default material properties
+                    f.write("Ns 90.000000\\n")  # Shininess
+                    f.write("Ka 0.100000 0.100000 0.100000\\n")  # Ambient
+                    f.write("Ni 1.500000\\n")  # Optical density
+                    f.write("d 1.000000\\n")   # Dissolve/Transparency
+                    f.write("illum 3\\n")      # Illumination model
+                    
+                    # Try to get material properties from Principled BSDF
+                    if mat.use_nodes and mat.node_tree:
+                        bsdf_node = None
+                        texture_node = None
+                        
+                        # Find BSDF and texture nodes
+                        for node in mat.node_tree.nodes:
+                            if node.type == 'BSDF_PRINCIPLED':
+                                bsdf_node = node
+                            elif node.type == 'TEX_IMAGE' and node.image:
+                                texture_node = node
+                        
+                        if bsdf_node:
+                            # Get base color (diffuse)
+                            if "Base Color" in bsdf_node.inputs:
+                                color = bsdf_node.inputs["Base Color"].default_value
                                 f.write(f"Kd {{color[0]:.6f}} {{color[1]:.6f}} {{color[2]:.6f}}\\n")
-                            break
-                else:
-                    f.write("Kd 0.800000 0.800000 0.800000\\n")
+                            
+                            # Get specular properties
+                            if "Metallic" in bsdf_node.inputs:
+                                metallic = bsdf_node.inputs["Metallic"].default_value
+                                specular = 0.5 + (metallic * 0.5)  # Convert metallic to specular
+                                f.write(f"Ks {{specular:.6f}} {{specular:.6f}} {{specular:.6f}}\\n")
+                            
+                            # Get emission
+                            emission_input = None
+                            if "Emission Color" in bsdf_node.inputs:
+                                emission_input = bsdf_node.inputs["Emission Color"]
+                            elif "Emission" in bsdf_node.inputs:
+                                emission_input = bsdf_node.inputs["Emission"]
+                            
+                            if emission_input:
+                                emission = emission_input.default_value
+                                f.write(f"Ke {{emission[0]:.6f}} {{emission[1]:.6f}} {{emission[2]:.6f}}\\n")
+                        
+                        # Handle texture mapping
+                        if texture_node and texture_node.image:
+                            image_name = texture_node.image.name
+                            
+                            # Try to find the actual texture file path
+                            texture_file_path = None
+                            
+                            # Check if image has filepath
+                            if hasattr(texture_node.image, 'filepath') and texture_node.image.filepath:
+                                texture_file_path = os.path.basename(texture_node.image.filepath)
+                            else:
+                                # Use image name as fallback
+                                texture_file_path = image_name
+                            
+                            # Ensure proper file extension
+                            if not any(texture_file_path.lower().endswith(ext) for ext in ['.jpg', '.jpeg', '.png', '.bmp', '.tga', '.tiff']):
+                                # If no extension, try to guess from image format
+                                if hasattr(texture_node.image, 'file_format'):
+                                    if texture_node.image.file_format == 'JPEG':
+                                        texture_file_path += '.jpg'
+                                    elif texture_node.image.file_format == 'PNG':
+                                        texture_file_path += '.png'
+                                    else:
+                                        texture_file_path += '.jpg'  # Default fallback
+                                else:
+                                    texture_file_path += '.jpg'  # Default fallback
+                            
+                            # Write texture map reference
+                            f.write(f"map_Kd {{texture_file_path}}\\n")
+                            
+                            logger.info(f"Added texture reference to MTL: {{texture_file_path}}")
+                            
+                            # Optional: Add other texture maps if available
+                            # Check if the same texture is used for other properties
+                            for link in mat.node_tree.links:
+                                if link.from_node == texture_node:
+                                    input_name = link.to_socket.name
+                                    
+                                    # Map Blender input names to MTL map types
+                                    if input_name == "Roughness":
+                                        f.write(f"map_Pr {{texture_file_path}}\\n")  # Roughness map
+                                    elif input_name == "Metallic":
+                                        f.write(f"map_Pm {{texture_file_path}}\\n")  # Metallic map
+                                    elif input_name == "Normal":
+                                        f.write(f"map_Bump {{texture_file_path}}\\n")  # Normal/bump map
+                    else:
+                        # No nodes - use default material
+                        f.write("Kd 0.800000 0.800000 0.800000\\n")
+                        f.write("Ks 0.500000 0.500000 0.500000\\n")
+                        f.write("Ke 0.000000 0.000000 0.000000\\n")
+                    
+                    f.write("\\n")  # Empty line between materials
             else:
+                # No materials - create default
                 f.write("newmtl DefaultMaterial\\n")
+                f.write("Ns 90.000000\\n")
+                f.write("Ka 0.100000 0.100000 0.100000\\n")
                 f.write("Kd 0.800000 0.800000 0.800000\\n")
+                f.write("Ks 0.500000 0.500000 0.500000\\n")
+                f.write("Ke 0.000000 0.000000 0.000000\\n")
+                f.write("Ni 1.500000\\n")
+                f.write("d 1.000000\\n")
+                f.write("illum 3\\n")
         
         logger.info(f"MTL file created: {{mtl_path}}")
         
@@ -677,52 +778,6 @@ def export_obj(filepath):
         logger.error(f"Manual OBJ export failed: {{e}}")
         import traceback
         traceback.print_exc()
-
-def apply_transforms_to_mesh(obj, location=None, rotation=None, scale=None):
-    """Apply transforms directly to mesh data using bmesh"""
-    logger.info(f"Applying transforms to mesh data for object: {{obj.name}}")
-    
-    # Enter edit mode and create bmesh
-    bpy.context.view_layer.objects.active = obj
-    bpy.ops.object.mode_set(mode='EDIT')
-    
-    # Create bmesh from mesh
-    bm = bmesh.from_edit_mesh(obj.data)
-    
-    # Create transformation matrix
-    matrix = Matrix.Identity(4)
-    
-    # Apply scale first
-    if scale:
-        scale_matrix = Matrix.Diagonal((*scale, 1.0))
-        matrix = matrix @ scale_matrix
-        logger.info(f"Applied scale transform: {{scale}}")
-    
-    # Apply rotation second
-    if rotation:
-        # Create rotation matrix from Euler angles
-        euler = Euler(rotation, 'XYZ')
-        rotation_matrix = euler.to_matrix().to_4x4()
-        matrix = matrix @ rotation_matrix
-        logger.info(f"Applied rotation transform (radians): {{rotation}}")
-        logger.info(f"Rotation (degrees): {{[math.degrees(r) for r in rotation]}}")
-    
-    # Apply translation last
-    if location:
-        translation_matrix = Matrix.Translation(location)
-        matrix = matrix @ translation_matrix
-        logger.info(f"Applied location transform: {{location}}")
-    
-    # Transform all vertices
-    bmesh.ops.transform(bm, matrix=matrix, verts=bm.verts)
-    
-    # Update mesh
-    bmesh.update_edit_mesh(obj.data)
-    
-    # Exit edit mode
-    bpy.ops.object.mode_set(mode='OBJECT')
-    
-    logger.info("Mesh transformation completed")
 
 def apply_updates(obj, spec):
     """Apply updates to object based on specification"""
@@ -917,6 +972,135 @@ def apply_updates(obj, spec):
                 # List available inputs for debugging
                 available_inputs = [inp.name for inp in bsdf.inputs]
                 logger.info(f"Available BSDF inputs: {{available_inputs}}")
+
+        # NEW: Handle texture application in Blender
+        if "textureId" in mat_spec and mat_spec["textureId"]:
+            try:
+                texture_id = mat_spec["textureId"]
+                texture_scale = mat_spec.get("textureScale", 1.0)
+                
+                logger.info(f"Looking for texture with ID: {{texture_id}}")
+                
+                # Try to find texture file in static/textures directory
+                import glob
+                import shutil
+                
+                # FIXED: Improve texture file search paths
+                # Get absolute paths to backend directories
+                script_dir = Path(__file__).parent  # This should be the backend directory
+                
+                # Multiple search locations for texture files
+                texture_search_paths = [
+                    # Current backend static/textures
+                    script_dir / "static" / "textures",
+                    # Parent directory static/textures  
+                    script_dir.parent / "static" / "textures",
+                    # Relative paths from script execution
+                    Path("static") / "textures",
+                    Path("..") / "static" / "textures",
+                    Path("backend") / "static" / "textures"
+                ]
+                
+                logger.info(f"Searching for texture in paths: {{[str(p) for p in texture_search_paths]}}")
+                
+                texture_path = None
+                texture_filename = None
+                
+                # Search in all possible locations
+                for search_path in texture_search_paths:
+                    if search_path.exists():
+                        logger.info(f"Checking directory: {{search_path}}")
+                        # List all files in the directory for debugging
+                        try:
+                            files_in_dir = list(search_path.glob("*"))
+                            logger.info(f"Files in {{search_path}}: {{[f.name for f in files_in_dir[:10]]}}")  # Show first 10 files
+                        except Exception as e:
+                            logger.warning(f"Could not list files in {{search_path}}: {{e}}")
+                        
+                        # Search for files containing the texture ID
+                        pattern = f"*{{texture_id}}*"
+                        matches = list(search_path.glob(pattern))
+                        
+                        if matches:
+                            texture_path = str(matches[0])
+                            texture_filename = matches[0].name
+                            logger.info(f"Found texture file: {{texture_path}}")
+                            break
+                        else:
+                            logger.info(f"No match for pattern '{{pattern}}' in {{search_path}}")
+                
+                if not texture_path:
+                    # Last resort: try direct glob patterns
+                    direct_patterns = [
+                        f"static/textures/*{{texture_id}}*",
+                        f"../static/textures/*{{texture_id}}*", 
+                        f"backend/static/textures/*{{texture_id}}*",
+                        f"**/*{{texture_id}}*"  # Recursive search
+                    ]
+                    
+                    for pattern in direct_patterns:
+                        matches = glob.glob(pattern, recursive=True)
+                        if matches:
+                            texture_path = matches[0]
+                            texture_filename = os.path.basename(texture_path)
+                            logger.info(f"Found texture via glob: {{texture_path}}")
+                            break
+                
+                if texture_path and os.path.exists(texture_path):
+                    logger.info(f"Loading texture: {{texture_path}}")
+                    
+                    # Load texture in Blender
+                    image = bpy.data.images.load(texture_path)
+                    
+                    # Set the image name to just the filename for MTL export
+                    if not texture_filename:
+                        texture_filename = os.path.basename(texture_path)
+                    image.name = texture_filename
+                    
+                    # Create texture node
+                    texture_node = nodes.new(type='ShaderNodeTexImage')
+                    texture_node.image = image
+                    texture_node.location = (-300, 0)
+                    
+                    # Create UV mapping node
+                    uv_map_node = nodes.new(type='ShaderNodeUVMap')
+                    uv_map_node.location = (-500, 0)
+                    
+                    # Create mapping node for texture scaling
+                    mapping_node = nodes.new(type='ShaderNodeMapping')
+                    mapping_node.location = (-400, 0)
+                    mapping_node.inputs['Scale'].default_value = (texture_scale, texture_scale, texture_scale)
+                    
+                    # Link nodes: UV Map -> Mapping -> Texture -> BSDF
+                    links.new(uv_map_node.outputs['UV'], mapping_node.inputs['Vector'])
+                    links.new(mapping_node.outputs['Vector'], texture_node.inputs['Vector'])
+                    links.new(texture_node.outputs['Color'], bsdf.inputs['Base Color'])
+                    
+                    # IMPORTANT: Copy texture file to output directory for MTL reference
+                    output_dir = os.path.dirname(args.output)
+                    texture_output_path = os.path.join(output_dir, texture_filename)
+                    
+                    try:
+                        if not os.path.exists(texture_output_path):
+                            shutil.copy2(texture_path, texture_output_path)
+                            logger.info(f"Copied texture file to: {{texture_output_path}}")
+                        else:
+                            logger.info(f"Texture file already exists at: {{texture_output_path}}")
+                    except Exception as copy_error:
+                        logger.warning(f"Failed to copy texture file: {{copy_error}}")
+                    
+                    logger.info(f"Successfully applied texture: {{texture_path}} with scale {{texture_scale}}")
+                else:
+                    logger.warning(f"Texture file not found for ID: {{texture_id}}")
+                    logger.warning("Available search paths were:")
+                    for path in texture_search_paths:
+                        exists_status = "EXISTS" if path.exists() else "NOT FOUND"
+                        logger.warning(f"  {{path}} - {{exists_status}}")
+                    
+            except Exception as e:
+                logger.error(f"Failed to apply texture: {{e}}")
+                import traceback
+                traceback.print_exc()
 
 def main():
     try:

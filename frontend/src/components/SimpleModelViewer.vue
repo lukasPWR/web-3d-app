@@ -1872,7 +1872,7 @@ export default {
         return;
       }
       
-      // Collect current model parameters
+      // Collect current model parameters including ALL material properties
       const updateData = {
         position: [
           selectedObject.value.position.x,
@@ -1894,18 +1894,20 @@ export default {
           roughness: selectedObjectMaterial.value.roughness,
           metalness: selectedObjectMaterial.value.metalness,
           emissive: selectedObjectMaterial.value.emissive,
-          emissiveIntensity: selectedObjectMaterial.value.emissiveIntensity
+          emissiveIntensity: selectedObjectMaterial.value.emissiveIntensity,
+          textureId: selectedObjectMaterial.value.textureId || null,
+          textureScale: selectedObjectMaterial.value.textureScale || 1.0
         }
       };
       
       isUpdating.value = true;
-      showUpdateStatus('Processing model update...', 'info');
+      showUpdateStatus('Processing model update with materials and textures...', 'info');
       
       try {
-        const response = await axios.post(`/api/models/${modelId}/update`, updateData);
+        const response = await api.updateModel(modelId, updateData);
         
         if (response.data && response.data.updatedModel) {
-          showUpdateStatus('Model updated successfully!', 'success');
+          showUpdateStatus('Model updated successfully with all material properties!', 'success');
           
           // Emit event to parent component
           emit('model-updated', {
@@ -2314,7 +2316,7 @@ export default {
 .control-hint span {
   background-color: #f0f8ff;
   padding: 2px 6px;
-  border-radius: 3px;
+   border-radius: 3px;
   border: 1px solid #e0e0e0;
 }
 

@@ -7,8 +7,6 @@ import bpy
 import sys
 import json
 import argparse
-import os
-import mathutils
 from pathlib import Path
 
 

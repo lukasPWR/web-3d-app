@@ -856,6 +856,15 @@ def update_model(model_id):
             if "emissiveIntensity" in mat_data:
                 material_spec["emissiveIntensity"] = float(mat_data["emissiveIntensity"])
             
+            # NEW: Handle texture properties
+            if "textureId" in mat_data and mat_data["textureId"]:
+                material_spec["textureId"] = str(mat_data["textureId"])
+                logger.info(f"Adding texture ID to material spec: {mat_data['textureId']}")
+            
+            if "textureScale" in mat_data:
+                material_spec["textureScale"] = float(mat_data["textureScale"])
+                logger.info(f"Adding texture scale to material spec: {mat_data['textureScale']}")
+            
             if material_spec:
                 blender_update_spec["material"] = material_spec
         
@@ -868,7 +877,7 @@ def update_model(model_id):
         logger.info(f"Blender update spec: {json.dumps(blender_update_spec, indent=2)}")
         
         # Execute update using Blender service
-        success, output_path, error = blender_service.update_model(
+        success, updated_model_path, error = blender_service.update_model(
             str(original_path), 
             blender_update_spec,
             output_name
@@ -878,52 +887,74 @@ def update_model(model_id):
             logger.error(f"Failed to update model: {error}")
             return jsonify({"error": f"Failed to update model: {error}"}), 500
         
-        # Create new model entry for the updated version
-        output_path_obj = Path(output_path)
-        if not output_path_obj.exists():
-            return jsonify({"error": "Updated model file was not created"}), 500
+        # Copy the updated model and MTL to static folder
+        output_filename = f"{model_id}_edited.obj"
+        static_output_path = MODELS_FOLDER / output_filename
         
-        # Get file stats
-        file_stats = output_path_obj.stat()
-        
-        # Create new model entry
-        updated_model = {
-            "id": str(uuid.uuid4()),
-            "name": f"{model['name']} (Edited)",
-            "description": f"Edited version of {model['name']}",
-            "format": "obj",
-            "category": "edited",
-            "fileSize": file_stats.st_size,
-            "createdAt": datetime.now().isoformat(),
-            "modelUrl": f"/models/{output_path_obj.name}",
-            "thumbnailUrl": None,
-            "tags": model.get("tags", []) + ["edited"],
-            "isEdited": True,
-            "originalModelId": model_id
-        }
-        
-        # Copy updated files to models folder if they're not already there
-        models_output_dir = MODELS_FOLDER
-        final_obj_path = models_output_dir / output_path_obj.name
-        final_mtl_path = models_output_dir / output_path_obj.with_suffix('.mtl').name
-        
-        # Copy files if they're in a different location
-        if str(output_path_obj.parent) != str(models_output_dir):
-            shutil.copy2(str(output_path_obj), str(final_obj_path))
-            if output_path_obj.with_suffix('.mtl').exists():
-                shutil.copy2(str(output_path_obj.with_suffix('.mtl')), str(final_mtl_path))
-        
-        # Add to models list
-        models.append(updated_model)
-        save_data_to_file(models, MODELS_DB_FILE, "models")
-        
-        logger.info(f"Successfully updated model. New model ID: {updated_model['id']}")
-        
-        return jsonify({
-            "message": "Model updated successfully",
-            "updatedModel": updated_model,
-            "outputPath": str(final_obj_path)
-        }), 200
+        try:
+            # Copy OBJ file
+            shutil.copy2(updated_model_path, static_output_path)
+            
+            # Copy MTL file if it exists
+            mtl_source = updated_model_path.replace('.obj', '.mtl')
+            if os.path.exists(mtl_source):
+                mtl_output_path = static_output_path.with_suffix('.mtl')
+                shutil.copy2(mtl_source, mtl_output_path)
+                logger.info(f"Copied MTL file to: {mtl_output_path}")
+                
+                # NEW: Copy any referenced texture files
+                try:
+                    with open(mtl_source, 'r') as f:
+                        mtl_content = f.read()
+                    
+                    # Find texture references in MTL file
+                    import re
+                    texture_references = re.findall(r'map_\w+\s+(\S+)', mtl_content)
+                    
+                    for texture_ref in texture_references:
+                        texture_source = os.path.join(os.path.dirname(mtl_source), texture_ref)
+                        if os.path.exists(texture_source):
+                            texture_dest = MODELS_FOLDER / texture_ref
+                            if not texture_dest.exists():
+                                shutil.copy2(texture_source, texture_dest)
+                                logger.info(f"Copied texture file: {texture_ref}")
+                        else:
+                            logger.warning(f"Texture file not found: {texture_source}")
+                            
+                except Exception as texture_error:
+                    logger.warning(f"Error copying texture files: {texture_error}")
+            
+            # Create new model entry
+            new_model = {
+                "id": str(uuid.uuid4()),
+                "name": f"{model['name']} (Edited)",
+                "description": f"Edited version of {model['name']}",
+                "format": "obj",
+                "category": "edited",
+                "fileSize": os.path.getsize(static_output_path),
+                "createdAt": datetime.now().isoformat(),
+                "modelUrl": f"/models/{output_filename}",
+                "thumbnailUrl": None,
+                "tags": model.get("tags", []) + ["edited"],
+                "isEdited": True,
+                "originalModelId": model_id
+            }
+            
+            # Add to models database
+            models.append(new_model)
+            save_data_to_file(models, MODELS_DB_FILE, "models")
+            
+            logger.info(f"Saved {len(models)} models to database")
+            
+            return jsonify({
+                "success": True,
+                "message": "Model updated successfully",
+                "updatedModel": new_model
+            })
+            
+        except Exception as copy_error:
+            logger.error(f"Failed to copy updated model: {copy_error}")
+            return jsonify({"error": f"Failed to save updated model: {str(copy_error)}"}), 500
         
     except Exception as e:
         logger.error(f"Error updating model: {e}")
