@@ -58,21 +58,33 @@
           </div>
           
           <div class="form-group">
-            <label>Coordinates (X Y Z per line):</label>
-            <textarea 
-              v-model="customCoordsParams.coordinatesText" 
-              class="coordinates-textarea"
-              placeholder="0.0 0.0 0.0
-1.0 0.0 0.0
-0.5 1.0 0.0
-0.5 0.5 1.0"
-              rows="8"
-            ></textarea>
+            <label>Coordinates JSON File:</label>
+            <input 
+              type="file" 
+              accept=".json" 
+              @change="handleJsonFileUpload"
+              class="file-input"
+              ref="jsonFileInput"
+            >
             <div class="coordinates-help">
               <small>
-                Enter coordinates with X, Y, Z values separated by spaces, one point per line.
-                Example: "1.0 2.0 3.0" represents point at (1, 2, 3).
+                Upload a JSON file with vertex coordinates. Expected format: {"0": [x, y, z], "1": [x, y, z], ...}
+                or [{"x": x, "y": y, "z": z}, ...] or [[x, y, z], [x, y, z], ...]
               </small>
+            </div>
+            
+            <!-- Preview of loaded coordinates -->
+            <div v-if="customCoordsParams.loadedCoordinates.length > 0" class="coordinates-preview">
+              <h5>Loaded Coordinates ({{ customCoordsParams.loadedCoordinates.length }} points):</h5>
+              <div class="coordinates-list">
+                <div v-for="(coord, index) in customCoordsParams.loadedCoordinates.slice(0, 10)" :key="index" class="coordinate-item">
+                  Point {{ index + 1 }}: ({{ coord.x.toFixed(3) }}, {{ coord.y.toFixed(3) }}, {{ coord.z.toFixed(3) }})
+                </div>
+                <div v-if="customCoordsParams.loadedCoordinates.length > 10" class="more-coordinates">
+                  ... and {{ customCoordsParams.loadedCoordinates.length - 10 }} more points
+                </div>
+              </div>
+              <button @click="clearCoordinates" class="clear-btn">Clear Coordinates</button>
             </div>
           </div>
           
@@ -265,10 +277,8 @@ export default {
       name: 'My Custom Mesh',
       color: '#ffffff',
       useConvexHull: false,
-      coordinatesText: `0.0 0.0 0.0
-1.0 0.0 0.0
-0.5 1.0 0.0
-0.5 0.5 1.0`
+      loadedCoordinates: [],
+      fileName: ''
     });
     
     const toggleDrawer = () => {
@@ -417,36 +427,111 @@ export default {
       }
     };
     
-    const drawCustomCoords = async () => {
-      const coordsLines = customCoordsParams.coordinatesText.split('\n');
-      const points = [];
+    const handleJsonFileUpload = async (event) => {
+      const file = event.target.files[0];
+      if (!file) return;
       
-      for (const line of coordsLines) {
-        const trimmedLine = line.trim();
-        if (trimmedLine.length === 0) continue;
-        
-        const parts = trimmedLine.split(/\s+/); // Split by any whitespace
-        if (parts.length !== 3) {
-          alert(`Invalid coordinate format at line: "${trimmedLine}". Expected format: "X Y Z"`);
-          return;
-        }
-        
-        const [x, y, z] = parts.map(Number);
-        if (isNaN(x) || isNaN(y) || isNaN(z)) {
-          alert(`Invalid numeric values at line: "${trimmedLine}"`);
-          return;
-        }
-        
-        points.push({ x, y, z });
+      if (!file.name.toLowerCase().endsWith('.json')) {
+        alert('Please select a JSON file');
+        return;
       }
       
-      if (points.length < 3) {
-        alert(`Custom mesh requires at least 3 points, got ${points.length}`);
+      try {
+        const text = await file.text();
+        const jsonData = JSON.parse(text);
+        
+        // Parse different JSON formats
+        const coordinates = parseCoordinatesFromJson(jsonData);
+        
+        if (coordinates.length < 3) {
+          alert(`JSON file must contain at least 3 coordinate points, found ${coordinates.length}`);
+          return;
+        }
+        
+        customCoordsParams.loadedCoordinates = coordinates;
+        customCoordsParams.fileName = file.name;
+        
+        console.log(`Loaded ${coordinates.length} coordinates from ${file.name}`);
+        
+      } catch (error) {
+        console.error('Error reading JSON file:', error);
+        alert('Error reading JSON file: ' + error.message);
+      }
+    };
+    
+    const parseCoordinatesFromJson = (jsonData) => {
+      const coordinates = [];
+      
+      try {
+        // Format 1: Object with numbered keys {"0": [x, y, z], "1": [x, y, z], ...}
+        if (typeof jsonData === 'object' && !Array.isArray(jsonData)) {
+          const keys = Object.keys(jsonData).sort((a, b) => parseInt(a) - parseInt(b));
+          for (const key of keys) {
+            const value = jsonData[key];
+            if (Array.isArray(value) && value.length >= 3) {
+              coordinates.push({
+                x: parseFloat(value[0]),
+                y: parseFloat(value[1]),
+                z: parseFloat(value[2])
+              });
+            }
+          }
+        }
+        // Format 2: Array of objects [{"x": x, "y": y, "z": z}, ...]
+        else if (Array.isArray(jsonData) && jsonData.length > 0 && typeof jsonData[0] === 'object' && 'x' in jsonData[0]) {
+          for (const point of jsonData) {
+            if ('x' in point && 'y' in point && 'z' in point) {
+              coordinates.push({
+                x: parseFloat(point.x),
+                y: parseFloat(point.y),
+                z: parseFloat(point.z)
+              });
+            }
+          }
+        }
+        // Format 3: Array of arrays [[x, y, z], [x, y, z], ...]
+        else if (Array.isArray(jsonData) && jsonData.length > 0 && Array.isArray(jsonData[0])) {
+          for (const point of jsonData) {
+            if (Array.isArray(point) && point.length >= 3) {
+              coordinates.push({
+                x: parseFloat(point[0]),
+                y: parseFloat(point[1]),
+                z: parseFloat(point[2])
+              });
+            }
+          }
+        }
+        
+        // Validate coordinates
+        for (const coord of coordinates) {
+          if (isNaN(coord.x) || isNaN(coord.y) || isNaN(coord.z)) {
+            throw new Error('Invalid numeric values found in coordinates');
+          }
+        }
+        
+      } catch (error) {
+        throw new Error(`Failed to parse coordinates: ${error.message}`);
+      }
+      
+      return coordinates;
+    };
+    
+    const clearCoordinates = () => {
+      customCoordsParams.loadedCoordinates = [];
+      customCoordsParams.fileName = '';
+      // Clear the file input
+      const fileInput = document.querySelector('input[type="file"]');
+      if (fileInput) fileInput.value = '';
+    };
+    
+    const drawCustomCoords = async () => {
+      if (customCoordsParams.loadedCoordinates.length < 3) {
+        alert(`Custom mesh requires at least 3 points, currently loaded: ${customCoordsParams.loadedCoordinates.length}`);
         return;
       }
       
       console.log('Sending coordinates to API:', {
-        points: points,
+        points: customCoordsParams.loadedCoordinates,
         color: customCoordsParams.color,
         name: customCoordsParams.name,
         useConvexHull: customCoordsParams.useConvexHull
@@ -457,7 +542,7 @@ export default {
       
       try {
         const response = await api.drawCustomCoords(
-          points, 
+          customCoordsParams.loadedCoordinates, 
           customCoordsParams.color, 
           customCoordsParams.name, 
           customCoordsParams.useConvexHull
@@ -510,6 +595,8 @@ export default {
       addLineCommand,
       removeCommand,
       executeDrawingSession,
+      handleJsonFileUpload,
+      clearCoordinates,
       drawCustomCoords,
       addModelToScene
     };
@@ -819,5 +906,62 @@ export default {
   font-size: 18px;
   cursor: pointer;
   color: #666;
+}
+
+.file-input {
+  width: 100%;
+  padding: 8px;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  font-size: 14px;
+  background-color: white;
+}
+
+.coordinates-preview {
+  margin-top: 15px;
+  padding: 15px;
+  background-color: #f8f9fa;
+  border: 1px solid #dee2e6;
+  border-radius: 4px;
+}
+
+.coordinates-preview h5 {
+  margin: 0 0 10px 0;
+  color: #333;
+  font-size: 14px;
+}
+
+.coordinates-list {
+  max-height: 150px;
+  overflow-y: auto;
+  margin-bottom: 10px;
+}
+
+.coordinate-item {
+  font-family: monospace;
+  font-size: 12px;
+  color: #666;
+  margin-bottom: 2px;
+}
+
+.more-coordinates {
+  font-size: 12px;
+  color: #888;
+  font-style: italic;
+  margin-top: 5px;
+}
+
+.clear-btn {
+  padding: 4px 8px;
+  background-color: #dc3545;
+  color: white;
+  border: none;
+  border-radius: 3px;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.clear-btn:hover {
+  background-color: #c82333;
 }
 </style>
