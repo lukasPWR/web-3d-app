@@ -15,11 +15,10 @@ class BlenderDrawingService:
     
     def __init__(self, blender_executable: str = r"C:\Program Files\Blender Foundation\Blender 4.4\blender.exe"):
         self.blender_executable = blender_executable
-        self.timeout = 300  # 5 minutes
+        self.timeout = 300  
     
     def _create_execution_script(self, session_file: str, result_file: str) -> str:
         """Create Python script for Blender execution."""
-        # Use repr() to properly escape paths for Python strings
         session_file_repr = repr(session_file)
         result_file_repr = repr(result_file)
         

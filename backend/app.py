@@ -1,4 +1,4 @@
-from flask import Flask, jsonify, request, send_from_directory, url_for, make_response
+from flask import Flask, jsonify, request, send_from_directory, make_response
 import os
 import uuid
 import json
@@ -7,7 +7,7 @@ from werkzeug.utils import secure_filename
 import shutil
 import logging
 from pathlib import Path
-from typing import List, Dict, Optional, Tuple
+from typing import List, Dict
 
 # Configuration constants
 class Config:
@@ -27,25 +27,20 @@ class Config:
         'tiff': 'image/tiff'
     }
 
-# Set up logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Create Flask app
 app = Flask(__name__)
 app.config['MAX_CONTENT_LENGTH'] = Config.MAX_CONTENT_LENGTH
 
-# Directory paths
 MODELS_FOLDER = Path(app.root_path) / 'static' / 'models'
 TEXTURES_FOLDER = Path(app.root_path) / 'static' / 'textures'
 MODELS_DB_FILE = MODELS_FOLDER / 'models_db.json'
 TEXTURES_DB_FILE = TEXTURES_FOLDER / 'textures_db.json'
 
-# Ensure directories exist
 MODELS_FOLDER.mkdir(parents=True, exist_ok=True)
 TEXTURES_FOLDER.mkdir(parents=True, exist_ok=True)
 
-# Global storage
 models: List[Dict] = []
 textures: List[Dict] = []
 
@@ -161,16 +156,14 @@ def cleanup_missing_files() -> None:
     """Remove database entries for files that no longer exist"""
     global models, textures
     
-    # Check models
     models[:] = [m for m in models if _file_exists_for_entry(m, "modelUrl", MODELS_FOLDER)]
-    
-    # Check textures  
+     
     textures[:] = [t for t in textures if _file_exists_for_entry(t, "textureUrl", TEXTURES_FOLDER)]
 
 def _file_exists_for_entry(entry: Dict, url_key: str, folder: Path) -> bool:
     """Check if file exists for database entry"""
     if url_key not in entry:
-        return True  # Keep entries without URLs
+        return True  
     
     filename = entry[url_key].split('/')[-1]
     file_path = folder / filename
@@ -202,7 +195,6 @@ def initialize_storage() -> None:
     
     logger.info(f"Storage initialized: {len(models)} models, {len(textures)} textures")
 
-# Initialize Blender service after app creation
 try:
     from blender_service import BlenderDrawingService
     blender_service = BlenderDrawingService()
@@ -214,7 +206,6 @@ except Exception as e:
     logger.error(f"Failed to initialize Blender service: {e}")
     blender_service = None
 
-# Initialize storage system
 initialize_storage()
 
 def _build_cors_preflight_response():
@@ -231,7 +222,6 @@ def serve_file_with_mime(folder: Path, filename: str) -> any:
         extension = Path(filename).suffix[1:].lower()
         mime_type = Config.MIME_TYPES.get(extension, 'application/octet-stream')
         
-        # Log file serving for debugging
         file_path = folder / filename
         logger.info(f"Attempting to serve file: {file_path} (exists: {file_path.exists()})")
         
@@ -318,10 +308,8 @@ def serve_model(filename):
     if request.method == 'OPTIONS':
         return _build_cors_preflight_response()
     
-    # Log the requested filename for debugging
     logger.info(f"Serving model file: {filename}")
     
-    # Check if file exists before trying to serve
     file_path = MODELS_FOLDER / filename
     if not file_path.exists():
         logger.error(f"Model file not found: {file_path}")
@@ -346,7 +334,6 @@ def delete_model(model_id):
     if not model:
         return jsonify({"error": "Model not found"}), 404
     
-    # Remove file if it exists
     try:
         filename = model["modelUrl"].split("/")[-1]
         file_path = MODELS_FOLDER / filename
@@ -355,9 +342,8 @@ def delete_model(model_id):
     except Exception as e:
         logger.error(f"Error removing file: {e}")
     
-    # Remove from models list
     models[:] = [m for m in models if m["id"] != model_id]
-    save_data_to_file(models, MODELS_DB_FILE, "models")  # Save changes
+    save_data_to_file(models, MODELS_DB_FILE, "models")  
     
     return jsonify({"message": "Model deleted successfully"}), 200
 
@@ -375,32 +361,27 @@ def upload_texture():
     if request.method == 'OPTIONS':
         return _build_cors_preflight_response()
     
-    # Check if file is in request
     if 'file' not in request.files:
         return jsonify({"error": "No file part"}), 400
     
     file = request.files['file']
     
-    # Check if file was selected
     if file.filename == '':
         return jsonify({"error": "No file selected"}), 400
     
-    # Validate file type
     if not is_allowed_file(file.filename, Config.ALLOWED_TEXTURE_EXTENSIONS):
         return jsonify({"error": f"File type not allowed. Supported: {', '.join(Config.ALLOWED_TEXTURE_EXTENSIONS)}"}), 400
     
-    # Secure filename and save file
     filename = secure_filename(file.filename)
     unique_filename = f"{uuid.uuid4()}_{filename}"
     file_path = TEXTURES_FOLDER / unique_filename
     file.save(str(file_path))
     
-    # Get file stats
     file_stats = file_path.stat()
     
     new_texture = create_file_entry(unique_filename, filename, file_stats, "texture", request.form.to_dict())
     textures.append(new_texture)
-    save_data_to_file(textures, TEXTURES_DB_FILE, "textures")  # Save to persistent storage
+    save_data_to_file(textures, TEXTURES_DB_FILE, "textures")  
     return jsonify(new_texture), 201
 
 @app.route('/api/textures/<texture_id>', methods=['DELETE', 'OPTIONS'])
@@ -413,7 +394,6 @@ def delete_texture(texture_id):
     if not texture:
         return jsonify({"error": "Texture not found"}), 404
     
-    # Remove file if it exists
     try:
         filename = texture["textureUrl"].split("/")[-1]
         file_path = TEXTURES_FOLDER / filename
@@ -422,7 +402,6 @@ def delete_texture(texture_id):
     except Exception as e:
         logger.error(f"Error removing texture file: {e}")
     
-    # Remove from textures list
     textures[:] = [t for t in textures if t["id"] != texture_id]
     save_data_to_file(textures, TEXTURES_DB_FILE, "textures")  # Save changes
     
@@ -438,21 +417,17 @@ def cleanup_generated_files(output_path: str, dest_path: str):
         dest_path: Destination file path
     """
     try:
-        # Copy main file
         shutil.copy2(output_path, dest_path)
         
-        # Handle MTL files for OBJ exports
         if output_path.endswith('.obj'):
             source_mtl = output_path.replace('.obj', '.mtl')
             dest_mtl = str(dest_path).replace('.obj', '.mtl')
             
-            # Copy MTL file if it exists and has content
             if os.path.exists(source_mtl):
                 try:
                     with open(source_mtl, 'r') as f:
                         mtl_content = f.read().strip()
                     
-                    # Check if MTL has actual material definitions
                     if 'newmtl' in mtl_content and len(mtl_content.split('\n')) > 5:
                         shutil.copy2(source_mtl, dest_mtl)
                         logger.info(f"Copied MTL file: {dest_mtl}")
@@ -491,10 +466,8 @@ def execute_drawing_session():
             dest_path = MODELS_FOLDER / filename
             cleanup_generated_files(output_path, dest_path)
             
-            # Get file stats
             file_stats = dest_path.stat()
             
-            # Create model entry
             new_model = {
                 "id": str(uuid.uuid4()),
                 "name": session_data.get("output_name", "Generated Model"),
@@ -553,15 +526,12 @@ def draw_line_endpoint():
         success, output_path, error = blender_service.create_line(points, color, thickness, name)
         
         if success and output_path:
-            # Copy to models directory
             filename = os.path.basename(output_path)
             dest_path = MODELS_FOLDER / filename
             cleanup_generated_files(output_path, dest_path)
             
-            # Get file stats
             file_stats = dest_path.stat()
             
-            # Create model entry
             new_model = {
                 "id": str(uuid.uuid4()),
                 "name": name,
@@ -608,15 +578,12 @@ def draw_primitive_endpoint():
         )
         
         if success and output_path:
-            # Copy to models directory with cleanup
             filename = os.path.basename(output_path)
             dest_path = MODELS_FOLDER / filename
             cleanup_generated_files(output_path, dest_path)
             
-            # Get file stats
             file_stats = dest_path.stat()
             
-            # Create model entry
             new_model = {
                 "id": str(uuid.uuid4()),
                 "name": name,
@@ -630,7 +597,7 @@ def draw_primitive_endpoint():
             }
             
             models.append(new_model)
-            save_data_to_file(models, MODELS_DB_FILE, "models")  # Save to persistent storage
+            save_data_to_file(models, MODELS_DB_FILE, "models") 
             logger.info(f"Successfully created primitive: {new_model}")
             return jsonify({"success": True, "model": new_model}), 201
         else:
@@ -659,7 +626,6 @@ def draw_custom_coords_endpoint():
         name = data.get('name', 'CustomMesh')
         use_convex_hull = data.get('use_convex_hull', True)
         
-        # Handle different coordinate input formats
         if isinstance(coordinates_text, list):
             # Frontend sent points as list of objects [{x, y, z}, ...]
             points = coordinates_text
@@ -672,15 +638,12 @@ def draw_custom_coords_endpoint():
         else:
             return jsonify({"error": "Invalid coordinates format"}), 400
         
-        # Log the final coordinates text
         logger.info(f"Final coordinates text:\n{coordinates_text_str}")
         
-        # Validate coordinates format
         lines = [line.strip() for line in coordinates_text_str.split('\n') if line.strip()]
         if len(lines) < 3:
             return jsonify({"error": f"At least 3 coordinate points are required, got {len(lines)}"}), 400
         
-        # Validate each coordinate line and collect parsed points
         parsed_points = []
         for i, line in enumerate(lines):
             parts = line.split()
@@ -698,7 +661,6 @@ def draw_custom_coords_endpoint():
         
         logger.info(f"Creating custom mesh with convex_hull={use_convex_hull}")
         
-        # Create session data using the correct command format
         color_obj = blender_service._convert_hex_to_rgba(color)
         
         session_data = {
@@ -723,12 +685,10 @@ def draw_custom_coords_endpoint():
         logger.info(f"Blender service result: success={success}, output_path={output_path}, error={error}")
         
         if success and output_path:
-            # Verify the output file exists and has content
             if not os.path.exists(output_path):
                 logger.error(f"Output file does not exist: {output_path}")
                 return jsonify({"success": False, "error": "Generated file not found"}), 500
             
-            # Check file size before copying
             output_size = os.path.getsize(output_path)
             logger.info(f"Generated file size: {output_size} bytes")
             
@@ -741,16 +701,13 @@ def draw_custom_coords_endpoint():
                 except Exception as e:
                     logger.error(f"Failed to read generated file: {e}")
             
-            # Copy to models directory
             filename = os.path.basename(output_path)
             dest_path = MODELS_FOLDER / filename
             cleanup_generated_files(output_path, dest_path)
             
-            # Get file stats and validate file was created properly
             file_stats = dest_path.stat()
             logger.info(f"Copied file size: {file_stats.st_size} bytes")
             
-            # Create model entry
             new_model = {
                 "id": str(uuid.uuid4()),
                 "name": name,
@@ -783,52 +740,41 @@ def update_model(model_id):
         return _build_cors_preflight_response()
     
     try:
-        # Check if BlenderDrawingService is available
         if 'blender_service' not in globals():
             return jsonify({"error": "Blender service not available"}), 500
         
-        # Find the model
         model = next((model for model in models if model["id"] == model_id), None)
         if not model:
             return jsonify({"error": "Model not found"}), 404
         
-        # Get update data from request
         update_data = request.get_json()
         if not update_data:
             return jsonify({"error": "No update data provided"}), 400
         
         logger.info(f"Updating model {model_id} with data: {json.dumps(update_data, indent=2)}")
         
-        # Get original file path
         original_filename = model["modelUrl"].split("/")[-1]
         original_path = MODELS_FOLDER / original_filename
         
-        # Check if original file exists
         if not original_path.exists():
             return jsonify({"error": "Original model file not found"}), 404
         
-        # Prepare update specification for Blender
         blender_update_spec = {}
         
-        # Handle position/location
         if "position" in update_data:
             blender_update_spec["location"] = update_data["position"]
         
-        # Handle rotation
         if "rotation" in update_data:
             blender_update_spec["rotation"] = update_data["rotation"]
-        
-        # Handle scale  
+          
         if "scale" in update_data:
             blender_update_spec["scale"] = update_data["scale"]
         
-        # Handle material properties
         if "material" in update_data:
             material_spec = {}
             mat_data = update_data["material"]
             
             if "color" in mat_data:
-                # Convert hex color to RGB
                 color_hex = mat_data["color"]
                 if color_hex.startswith('#'):
                     color_hex = color_hex[1:]
@@ -844,7 +790,6 @@ def update_model(model_id):
                 material_spec["metallic"] = float(mat_data["metalness"])
             
             if "emissive" in mat_data:
-                # Convert hex emissive color to RGB
                 emissive_hex = mat_data["emissive"]
                 if emissive_hex.startswith('#'):
                     emissive_hex = emissive_hex[1:]
@@ -856,7 +801,6 @@ def update_model(model_id):
             if "emissiveIntensity" in mat_data:
                 material_spec["emissiveIntensity"] = float(mat_data["emissiveIntensity"])
             
-            # NEW: Handle texture properties
             if "textureId" in mat_data and mat_data["textureId"]:
                 material_spec["textureId"] = str(mat_data["textureId"])
                 logger.info(f"Adding texture ID to material spec: {mat_data['textureId']}")
@@ -868,7 +812,6 @@ def update_model(model_id):
             if material_spec:
                 blender_update_spec["material"] = material_spec
         
-        # Generate output name
         model_name = model.get("name", "updated_model")
         safe_name = "".join(c for c in model_name if c.isalnum() or c in (' ', '-', '_')).rstrip()
         safe_name = safe_name.replace(' ', '_')
@@ -876,7 +819,6 @@ def update_model(model_id):
         
         logger.info(f"Blender update spec: {json.dumps(blender_update_spec, indent=2)}")
         
-        # Execute update using Blender service
         success, updated_model_path, error = blender_service.update_model(
             str(original_path), 
             blender_update_spec,
@@ -887,27 +829,22 @@ def update_model(model_id):
             logger.error(f"Failed to update model: {error}")
             return jsonify({"error": f"Failed to update model: {error}"}), 500
         
-        # Copy the updated model and MTL to static folder
         output_filename = f"{model_id}_edited.obj"
         static_output_path = MODELS_FOLDER / output_filename
         
         try:
-            # Copy OBJ file
             shutil.copy2(updated_model_path, static_output_path)
             
-            # Copy MTL file if it exists
             mtl_source = updated_model_path.replace('.obj', '.mtl')
             if os.path.exists(mtl_source):
                 mtl_output_path = static_output_path.with_suffix('.mtl')
                 shutil.copy2(mtl_source, mtl_output_path)
                 logger.info(f"Copied MTL file to: {mtl_output_path}")
                 
-                # NEW: Copy any referenced texture files
                 try:
                     with open(mtl_source, 'r') as f:
                         mtl_content = f.read()
                     
-                    # Find texture references in MTL file
                     import re
                     texture_references = re.findall(r'map_\w+\s+(\S+)', mtl_content)
                     
@@ -924,7 +861,6 @@ def update_model(model_id):
                 except Exception as texture_error:
                     logger.warning(f"Error copying texture files: {texture_error}")
             
-            # Create new model entry
             new_model = {
                 "id": str(uuid.uuid4()),
                 "name": f"{model['name']} (Edited)",
@@ -940,7 +876,6 @@ def update_model(model_id):
                 "originalModelId": model_id
             }
             
-            # Add to models database
             models.append(new_model)
             save_data_to_file(models, MODELS_DB_FILE, "models")
             
@@ -984,14 +919,11 @@ def index():
     })
 
 
-
-# Add error handler for uncaught exceptions
 @app.errorhandler(Exception)
 def handle_exception(e):
     logger.error(f"Unhandled exception: {e}", exc_info=True)
     return jsonify({"error": "Internal server error"}), 500
 
-# Add more robust startup
 def start_flask_app():
     """Start Flask app with error handling"""
     try:
