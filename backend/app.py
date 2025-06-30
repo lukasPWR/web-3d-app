@@ -179,6 +179,20 @@ def initialize_storage() -> None:
     global models, textures
     
     logger.info("Initializing storage system...")
+
+    MODELS_FOLDER.mkdir(parents=True, exist_ok=True)
+    TEXTURES_FOLDER.mkdir(parents=True, exist_ok=True)
+    
+    # Tworzenie pustych plików JSON jeśli nie istnieją
+    if not MODELS_DB_FILE.exists():
+        logger.info("Creating empty models database file")
+        with open(MODELS_DB_FILE, 'w', encoding='utf-8') as f:
+            json.dump([], f, indent=2)
+    
+    if not TEXTURES_DB_FILE.exists():
+        logger.info("Creating empty textures database file")
+        with open(TEXTURES_DB_FILE, 'w', encoding='utf-8') as f:
+            json.dump([], f, indent=2)
     
     models = load_data_from_file(MODELS_DB_FILE, "models")
     textures = load_data_from_file(TEXTURES_DB_FILE, "textures")
